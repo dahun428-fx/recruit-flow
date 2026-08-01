@@ -265,6 +265,7 @@ export function buildChatbotMcp(
           origin: "chatbot",
           tray: true, // 항상 트레이(결정 5).
           enabled: true,
+          upsert: false, // 항상 새 트레이 항목 — 기존 승인 블록 덮어쓰기 금지.
         });
         // card_block 발행(payload = 결정 H).
         const payload = {

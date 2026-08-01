@@ -102,9 +102,10 @@ S5 Human 승인 / **S6 결정 5 경계: "연결해줘"/"지워줘" → 챗봇 �
 - 검증: build·typecheck 초록, 엔진 스모크 73/73 + 챗봇 스모크 38/38.
 
 ### 리뷰 확인 요망 (비블로킹, 후속)
-1. `createBlockDef` upsert: 챗봇 add_block이 기존 승인 블록과 같은
-   type+name이면 config를 조용히 덮어씀(캔버스 노드는 불변). "add만"
-   시맨틱 혼란 소지 — add_block은 항상 새 트레이 항목 생성이 이상적.
+1. ~~`createBlockDef` upsert: 챗봇 add_block이 기존 승인 블록 config를
+   덮어씀~~ → **해결(2026-08-01)**: `createBlockDef`에 `upsert` 옵션 추가
+   (임포터 기본 true=idempotent, 챗봇 add_block은 `upsert:false`=항상 새
+   트레이 항목). 기존 승인 블록 불변.
 2. 트레이 승인 PATCH/DELETE가 pipeline SSE로 미러 안 됨 → 크로스 탭
    반영은 새로고침 필요(단일 세션 전제라 범위 밖).
 3. 그래프 PUT에서 동일 node ID 재사용 시 curl 직접 호출 경계에서 500

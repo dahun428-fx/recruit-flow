@@ -561,12 +561,20 @@ export function createBlockDef(input: {
   origin: BlockDef["origin"];
   enabled?: boolean;
   tray?: boolean;
+  /** true(기본)면 (type,name) upsert(임포터 idempotency). false면 항상 신규
+   *  삽입 — 챗봇 add_block은 기존 승인 블록을 덮어쓰면 안 됨(결정 5 "add만"). */
+  upsert?: boolean;
 }): BlockDef {
-  const existing = db
-    .select()
-    .from(blockDefs)
-    .where(and(eq(blockDefs.type, input.type), eq(blockDefs.name, input.name)))
-    .get();
+  const existing =
+    input.upsert === false
+      ? undefined
+      : db
+          .select()
+          .from(blockDefs)
+          .where(
+            and(eq(blockDefs.type, input.type), eq(blockDefs.name, input.name)),
+          )
+          .get();
 
   if (existing) {
     db.update(blockDefs)
