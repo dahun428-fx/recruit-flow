@@ -1,0 +1,29 @@
+.view {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.rz {
+  flex: none;
+  background: transparent;
+  transition: background 0.15s;
+  z-index: 20;
+}
+.rz:hover,
+.rz.dragging {
+  background: #4353ff55;
+}
+.rzV {
+  width: 5px;
+  cursor: col-resize;
+}
+
+.loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+}

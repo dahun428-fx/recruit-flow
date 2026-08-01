@@ -1,0 +1,32 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+
+# 프로젝트 로컬 Node 22 (nvm 우회 — better-sqlite3 네이티브 호환)
+/.node22
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+
+# typescript build info
+*.tsbuildinfo
+
+# production
+/build
+
+# local DB (schema는 drizzle/로 커밋, 데이터 파일은 제외)
+/data/*.db
+/data/*.db-*
+
+# env
+.env
+.env*.local
+
+# misc
+.DS_Store
+*.pem
+npm-debug.log*
+/coverage

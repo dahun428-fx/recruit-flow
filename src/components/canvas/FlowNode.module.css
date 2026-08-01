@@ -1,0 +1,160 @@
+.node {
+  width: 168px;
+  background: var(--surface);
+  border-radius: 10px;
+  border: 2px solid #cfd5de;
+  box-shadow: 0 1px 4px rgba(15, 22, 40, 0.08);
+  overflow: hidden;
+}
+.node.selected {
+  box-shadow: 0 0 0 3px rgba(67, 83, 255, 0.4);
+}
+
+/* Gate 노드: 마름모 느낌의 변형 카드 */
+.nodeGate {
+  width: 150px;
+  border-radius: 18px 6px 18px 6px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+}
+.hdInput { background: var(--c-input); }
+.hdAgent { background: var(--c-agent); }
+.hdOutput { background: var(--c-output); }
+.hdGate { background: var(--c-gate); }
+.hdHuman { background: var(--c-human); }
+.hdMount { background: var(--c-mount); }
+
+.body {
+  padding: 7px 9px 8px;
+}
+.name {
+  font-weight: 600;
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.desc {
+  font-size: 11px;
+  color: #7a8494;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.status {
+  font-size: 10.5px;
+  margin-top: 6px;
+  font-weight: 600;
+}
+
+.dlBtn {
+  margin-top: 6px;
+  width: 100%;
+  border: 1px solid var(--c-output);
+  background: #eafaf1;
+  color: var(--c-output);
+  border-radius: 6px;
+  padding: 4px 0;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+/* React Flow 핸들 시각(목업 h-input/h-output). */
+.handle {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #9aa4b5;
+}
+
+/* Gate pass/fail 핸들 레이블 */
+.handleLabel {
+  position: absolute;
+  font-size: 9px;
+  font-weight: 700;
+  color: #7a8494;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.handleLabel.pass {
+  top: -16px;
+  right: -14px;
+  color: var(--st-success);
+}
+.handleLabel.fail {
+  bottom: -16px;
+  right: -14px;
+  color: var(--st-failed);
+}
+
+/* 상단 장착 핸들(Agent에 pill 연결) */
+.handleTop {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #b08fd8;
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* 상태 색(globals.css --st-*). */
+.st-idle .status {
+  color: var(--st-idle);
+}
+.st-queued {
+  border-color: var(--st-queued);
+}
+.st-queued .status {
+  color: var(--st-queued);
+}
+.st-running {
+  border-color: var(--st-running);
+  animation: rf-pulse 1.4s ease-in-out infinite;
+}
+.st-running .status {
+  color: var(--st-running);
+}
+.st-succeeded {
+  border-color: var(--st-success);
+}
+.st-succeeded .status {
+  color: var(--st-success);
+}
+.st-failed {
+  border-color: var(--st-failed);
+}
+.st-failed .status {
+  color: var(--st-failed);
+}
+.st-skipped {
+  border-color: var(--border);
+}
+.st-skipped .status {
+  color: var(--text-faint);
+}
+
+/* Human 노드 waiting_human 주황 점멸 (목업: border-color 토글) */
+.st-waiting {
+  border-color: var(--st-waiting);
+  animation: nodeWait 1s step-end infinite;
+}
+.st-waiting .status {
+  color: var(--st-waiting);
+}
+
+@keyframes nodeWait {
+  50% { border-color: #ffd9b0; }
+}

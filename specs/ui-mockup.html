@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>recruit-flow UI 목업</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
+    font-size: 13px; color: #1f2430; background: #eef0f4;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  button { font: inherit; cursor: pointer; }
+
+  /* ── 툴팁 (Q9c) ──────────────────────── */
+  [data-tip] { position: relative; }
+  [data-tip]::after {
+    content: attr(data-tip);
+    position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%);
+    background: #2a3040; color: #fff; padding: 7px 11px; border-radius: 7px;
+    font-size: 11.5px; font-weight: 400; line-height: 1.5; width: max-content; max-width: 240px;
+    white-space: normal; text-align: left;
+    opacity: 0; visibility: hidden; transition: opacity .15s .5s; /* 0.5초 지연 */
+    pointer-events: none; z-index: 100; box-shadow: 0 3px 10px rgba(0,0,0,.25);
+  }
+  [data-tip]:hover::after { opacity: 1; visibility: visible; }
+  .palette [data-tip]::after { left: 100%; bottom: auto; top: 0; transform: translateX(10px); }
+
+  /* ── 상단 바 ─────────────────────────── */
+  .topbar {
+    height: 48px; background: #fff; border-bottom: 1px solid #dde1e8;
+    display: flex; align-items: center; gap: 14px; padding: 0 14px; flex: none; z-index: 30;
+  }
+  .logo { font-weight: 700; font-size: 14px; color: #4353ff; }
+  .tabs { display: flex; gap: 2px; background: #eef0f4; border-radius: 8px; padding: 3px; }
+  .tabs button {
+    border: 0; background: transparent; padding: 5px 16px; border-radius: 6px; color: #5b6472;
+  }
+  .tabs button.active { background: #fff; color: #1f2430; font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+  .dropdown {
+    border: 1px solid #dde1e8; background: #fff; border-radius: 7px;
+    padding: 5px 10px; color: #38404d; display: flex; align-items: center; gap: 6px;
+  }
+  .dropdown::before { content: ""; }
+  .dropdown span.caret { color: #98a1b0; font-size: 10px; }
+  .spacer { flex: 1; }
+  .run-btn {
+    border: 0; border-radius: 7px; padding: 6px 18px; font-weight: 700; color: #fff;
+    background: #e5484d; display: flex; align-items: center; gap: 8px;
+  }
+  .run-progress { font-weight: 400; font-size: 12px; opacity: .9; }
+
+  /* ── 본문 ────────────────────────────── */
+  .main { flex: 1; display: flex; min-height: 0; }
+  .view { flex: 1; display: none; min-width: 0; }
+  .view.active { display: flex; }
+
+  /* 리사이즈 분할선 (Q9a) */
+  .rz { flex: none; background: transparent; transition: background .15s; z-index: 20; }
+  .rz:hover, .rz.dragging { background: #4353ff55; }
+  .rz-v { width: 5px; cursor: col-resize; }
+  .rz-h { height: 5px; cursor: row-resize; }
+
+  /* 팔레트 */
+  .palette {
+    width: 190px; flex: none; background: #fff; border-right: 1px solid #dde1e8;
+    overflow-y: auto; padding: 10px; min-width: 150px; max-width: 55vw;
+  }
+  .palette h3 {
+    font-size: 11px; color: #7a8494; margin: 14px 0 6px; letter-spacing: .04em;
+  }
+  .palette h3:first-child { margin-top: 0; }
+  .pal-item {
+    border: 1px solid #dde1e8; border-radius: 7px; background: #fafbfc;
+    padding: 6px 9px; margin-bottom: 5px; display: flex; align-items: center; gap: 7px;
+    cursor: pointer; font-size: 12.5px;
+  }
+  .pal-item.selected { border-color: #4353ff; background: #eef1ff; }
+  .pal-item.off .dot, .pal-item.off .pal-name { opacity: .38; }
+  /* 타입 카테고리 행 — 클릭 시 하위 항목 펼침 (Q10-B) */
+  .pal-cat { display: flex; align-items: center; gap: 7px; padding: 6px 7px; border-radius: 7px;
+    cursor: pointer; font-weight: 600; font-size: 12.5px; }
+  .pal-cat:hover { background: #f2f4f8; }
+  .pal-cat .cnt { margin-left: auto; font-size: 10px; color: #98a1b0; font-weight: 400; }
+  .pal-cat .caret { color: #98a1b0; font-size: 10px; transition: transform .15s; }
+  .pal-cat.open .caret { transform: rotate(90deg); }
+  .pal-children { display: none; margin: 2px 0 6px 12px; border-left: 1px solid #e4e7ee; padding-left: 8px; }
+  .pal-cat.open + .pal-children { display: block; }
+  .pal-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 행 토글: hover 시 노출, 비활성이면 상시 노출 */
+  .mini-switch { position: relative; width: 28px; height: 16px; flex: none;
+    opacity: 0; transition: opacity .12s; cursor: pointer; }
+  .pal-item:hover .mini-switch, .pal-item.off .mini-switch { opacity: 1; }
+  .mini-switch input { opacity: 0; width: 0; height: 0; }
+  .mini-switch .tr { position: absolute; inset: 0; background: #c3c9d4; border-radius: 99px; transition: .15s; }
+  .mini-switch .tr::before { content: ""; position: absolute; width: 12px; height: 12px; border-radius: 50%;
+    background: #fff; top: 2px; left: 2px; transition: .15s; }
+  .mini-switch input:checked + .tr { background: #4353ff; }
+  .mini-switch input:checked + .tr::before { left: 14px; }
+  .dot { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+  .pal-note { font-size: 11px; color: #98a1b0; padding: 2px 1px 6px; line-height: 1.5; }
+  .tray-badge { background: #4353ff; color: #fff; border-radius: 99px; font-size: 10px; padding: 1px 7px; margin-left: 5px; }
+
+  /* 팔레트 상세 팝오버 (Q9b) */
+  .popover {
+    position: fixed; width: 250px; background: #fff; border: 1px solid #cfd5de;
+    border-radius: 10px; box-shadow: 0 8px 28px rgba(15,22,40,.18); padding: 13px; z-index: 50;
+    display: none;
+  }
+  .popover.open { display: block; }
+  .popover h4 { display: flex; align-items: center; gap: 7px; font-size: 13px; margin-bottom: 6px; }
+  .popover p { font-size: 11.5px; color: #5b6472; line-height: 1.6; margin-bottom: 8px; }
+  .popover .hint { font-size: 11px; color: #98a1b0; border-top: 1px dashed #dde1e8; padding-top: 8px; }
+  .popover .hint b { color: #4353ff; }
+
+  /* 캔버스 */
+  .canvas-wrap { flex: 1; position: relative; overflow: auto; min-width: 200px; background:
+    radial-gradient(circle, #d6dae2 1px, transparent 1px); background-size: 22px 22px; }
+  .canvas { position: relative; width: 1330px; height: 620px; }
+  svg.edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .edge { stroke: #9aa4b5; stroke-width: 2; fill: none; }
+  .edge.flow { stroke: #4a9eff; stroke-dasharray: 7 5; animation: dash 1s linear infinite; }
+  .edge.mount { stroke: #b08fd8; stroke-dasharray: 4 4; stroke-width: 1.6; }
+  .edge-label { font-size: 10px; fill: #7a8494; }
+  @keyframes dash { to { stroke-dashoffset: -12; } }
+
+  .node {
+    position: absolute; width: 168px; background: #fff; border-radius: 10px;
+    border: 2px solid #cfd5de; box-shadow: 0 1px 4px rgba(15,22,40,.08); overflow: hidden;
+  }
+  .node header {
+    display: flex; align-items: center; gap: 6px; padding: 5px 9px;
+    font-size: 11px; font-weight: 700; color: #fff;
+  }
+  .node .body { padding: 7px 9px 8px; }
+  .node .name { font-weight: 600; font-size: 12.5px; }
+  .node .desc { font-size: 11px; color: #7a8494; margin-top: 2px; }
+  .node .status { font-size: 10.5px; margin-top: 6px; font-weight: 600; }
+  .h-input, .h-output { position: absolute; top: 50%; width: 10px; height: 10px;
+    border-radius: 50%; background: #fff; border: 2px solid #9aa4b5; transform: translateY(-50%); }
+  .h-input { left: -6px; } .h-output { right: -6px; }
+  .h-top { position: absolute; top: -6px; left: 50%; transform: translateX(-50%);
+    width: 10px; height: 10px; border-radius: 50%; background: #fff; border: 2px solid #b08fd8; }
+
+  .hd-input { background: #6b7a90; } .hd-agent { background: #4353ff; }
+  .hd-gate { background: #d97917; } .hd-human { background: #e5484d; }
+  .hd-output { background: #2f9e6e; }
+
+  .node.st-success { border-color: #2f9e6e; } .node.st-success .status { color: #2f9e6e; }
+  .node.st-running { border-color: #4a9eff; animation: pulse 1.4s ease-in-out infinite; }
+  .node.st-running .status { color: #4a9eff; }
+  .node.st-idle .status { color: #98a1b0; }
+  .node.st-waiting { border-color: #ff8c1a; animation: blink 1s step-end infinite; }
+  .node.st-waiting .status { color: #ff8c1a; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 5px rgba(74,158,255,.18); } }
+  @keyframes blink { 50% { border-color: #ffd9b0; } }
+
+  .node.gate { width: 150px; border-radius: 18px 6px 18px 6px; }
+
+  .pill {
+    position: absolute; background: #f6f1fc; border: 1.6px dashed #b08fd8;
+    border-radius: 99px; padding: 5px 13px; font-size: 11.5px; color: #6d4d9c; font-weight: 600;
+  }
+  .pill .tag { font-size: 9.5px; color: #a08bc4; font-weight: 400; margin-right: 4px; }
+  .pill .h-bottom { position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%);
+    width: 9px; height: 9px; border-radius: 50%; background: #fff; border: 2px solid #b08fd8; }
+
+  .snapshot-hint {
+    position: absolute; top: 10px; left: 12px; background: #fff; border: 1px solid #dde1e8;
+    border-radius: 7px; padding: 5px 10px; font-size: 11px; color: #7a8494;
+  }
+
+  /* 사이드 패널 */
+  .sidepanel {
+    width: 340px; flex: none; background: #fff; border-left: 1px solid #dde1e8;
+    display: flex; flex-direction: column; min-height: 0; min-width: 260px; max-width: 55vw;
+  }
+  .sp-tabs { display: flex; border-bottom: 1px solid #dde1e8; flex: none; }
+  .sp-tabs button {
+    flex: 1; border: 0; background: transparent; padding: 9px; color: #7a8494; border-bottom: 2px solid transparent;
+  }
+  .sp-tabs button.active { color: #1f2430; font-weight: 700; border-bottom-color: #4353ff; }
+  .sp-body { flex: 1; overflow-y: auto; padding: 12px; }
+  .sp-node-title { display: flex; align-items: center; gap: 7px; font-weight: 700; margin-bottom: 10px; }
+  .field { margin-bottom: 11px; }
+  .field label { display: block; font-size: 11px; color: #7a8494; margin-bottom: 4px; width: fit-content; }
+  .field .box {
+    border: 1px solid #dde1e8; border-radius: 7px; padding: 6px 9px; background: #fafbfc; color: #38404d;
+  }
+  /* 고급 설정 (Q9d) */
+  details.adv { margin-top: 14px; border-top: 1px dashed #dde1e8; padding-top: 10px; }
+  details.adv summary {
+    cursor: pointer; font-size: 12px; color: #7a8494; font-weight: 600; list-style: none;
+    display: flex; align-items: center; gap: 6px; margin-bottom: 10px;
+  }
+  details.adv summary::before { content: "▸"; transition: transform .15s; }
+  details.adv[open] summary::before { transform: rotate(90deg); }
+  .stream-chip { display: inline-flex; align-items: center; gap: 5px; background: #e8f2ff;
+    color: #2470c2; border-radius: 99px; padding: 2px 10px; font-size: 11px; font-weight: 600; margin-bottom: 9px; }
+  .stream-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #4a9eff;
+    animation: blink 1s step-end infinite; }
+  .artifact {
+    border: 1px solid #dde1e8; border-radius: 8px; padding: 10px; background: #fafbfc;
+    font-size: 12px; line-height: 1.65; color: #38404d;
+  }
+  .artifact h4 { font-size: 12.5px; margin-bottom: 4px; }
+  .cursor { display: inline-block; width: 7px; height: 13px; background: #4a9eff; vertical-align: -2px;
+    animation: blink 1s step-end infinite; }
+  .rounds { display: flex; gap: 5px; margin: 10px 0 6px; }
+  .rounds span { border: 1px solid #dde1e8; border-radius: 99px; padding: 2px 10px; font-size: 11px; color: #7a8494; }
+  .rounds span.on { background: #4353ff; border-color: #4353ff; color: #fff; }
+
+  /* 문서 탭 */
+  .docs { flex: 1; display: flex; min-height: 0; background: #fff; }
+  .doc-list { width: 230px; border-right: 1px solid #dde1e8; padding: 12px; overflow-y: auto;
+    flex: none; min-width: 150px; max-width: 45vw; }
+  .doc-item { padding: 7px 9px; border-radius: 7px; margin-bottom: 3px; color: #38404d; }
+  .doc-item.on { background: #eef1ff; color: #4353ff; font-weight: 600; }
+  .doc-edit { flex: 1; display: flex; flex-direction: column; padding: 14px; min-width: 0; }
+  .doc-edit textarea {
+    flex: 1; border: 1px solid #dde1e8; border-radius: 8px; padding: 12px; font: 12.5px/1.7 Consolas, monospace;
+    color: #38404d; resize: none; margin-top: 10px;
+  }
+  .doc-versions { width: 210px; border-left: 1px solid #dde1e8; padding: 12px; overflow-y: auto;
+    flex: none; min-width: 150px; max-width: 45vw; }
+  .ver { border-left: 2px solid #dde1e8; padding: 2px 0 10px 10px; font-size: 11.5px; color: #7a8494; }
+  .ver b { color: #38404d; display: block; }
+
+  /* 채팅 독 */
+  .chatdock { flex: none; background: #fff; border-top: 1px solid #dde1e8; height: 205px;
+    display: flex; flex-direction: column; min-height: 90px; max-height: 60vh; }
+  .chatdock.collapsed .chat-stream { display: none; }
+  .chatdock.collapsed { height: auto !important; min-height: 0; }
+  .chat-head { display: flex; align-items: center; padding: 5px 12px; color: #7a8494; font-size: 11px;
+    border-bottom: 1px solid #eef0f4; }
+  .chat-head button { border: 0; background: none; color: #7a8494; margin-left: auto; }
+  .chat-stream { flex: 1; overflow-y: auto; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .card { border: 1px solid #dde1e8; border-radius: 9px; padding: 8px 11px; max-width: 640px; font-size: 12px; }
+  .card .k { font-size: 10.5px; font-weight: 700; letter-spacing: .03em; margin-bottom: 3px; }
+  .card.run { background: #f2fbf6; border-color: #bfe6d2; } .card.run .k { color: #2f9e6e; }
+  .card.gatefail { background: #fff7ed; border-color: #f2d9b8; } .card.gatefail .k { color: #d97917; }
+  .card.human { background: #fff5f2; border-color: #f4cdc4; } .card.human .k { color: #e5484d; }
+  .card .actions { margin-top: 7px; display: flex; gap: 6px; }
+  .card .actions button { border: 1px solid #dde1e8; background: #fff; border-radius: 6px; padding: 4px 12px; font-size: 12px; }
+  .card .actions button.primary { background: #4353ff; border-color: #4353ff; color: #fff; font-weight: 600; }
+  .chat-input { flex: none; display: flex; gap: 8px; padding: 8px 12px; border-top: 1px solid #eef0f4; }
+  .chat-input input { flex: 1; border: 1px solid #dde1e8; border-radius: 8px; padding: 8px 12px; background: #fafbfc; }
+  .chat-input button { border: 0; background: #4353ff; color: #fff; border-radius: 8px; padding: 0 18px; font-weight: 600; }
+  .m3-note { font-size: 10.5px; color: #98a1b0; align-self: center; }
+</style>
+</head>
+<body>
+
+<!-- 상단 바 -->
+<div class="topbar">
+  <span class="logo">recruit-flow</span>
+  <div class="tabs">
+    <button id="tab-canvas" class="active" onclick="showView('canvas')">캔버스</button>
+    <button id="tab-docs" onclick="showView('docs')">문서</button>
+  </div>
+  <div class="dropdown" data-tip="파이프라인 전환·새로 만들기. 전환해도 화면 구조는 유지되고 캔버스와 채팅만 교체됩니다">📁 이력서 파이프라인 v1 <span class="caret">▾</span></div>
+  <span class="spacer"></span>
+  <div class="dropdown" data-tip="과거 run을 선택하면 캔버스가 그 run의 스냅샷을 읽기 전용으로 보여줍니다">🕘 run #12 (실행 중) <span class="caret">▾</span></div>
+  <button class="run-btn" data-tip="실행 중단. 현재 노드의 SDK 호출을 취소하고 지금까지의 아티팩트는 보존됩니다">■ 중단 <span class="run-progress">4/7 노드 · 사람 대기 중</span></button>
+</div>
+
+<div class="main">
+
+  <!-- ═══ 캔버스 탭 ═══ -->
+  <div class="view active" id="view-canvas">
+
+    <!-- 팔레트 -->
+    <div class="palette" id="palette">
+      <h3>기본 블록</h3>
+      <div class="pal-note">타입 클릭 = 하위 항목 열림 · 하위 항목별 활성/비활성</div>
+
+      <div class="pal-cat open"><span class="dot" style="background:#4353ff"></span>Agent <span class="cnt">4</span><span class="caret">▸</span></div>
+      <div class="pal-children">
+        <div class="pal-item" data-color="#4353ff" data-tip="빈 Agent. 역할 프롬프트를 직접 작성하는 새 에이전트입니다"><span class="dot" style="background:#4353ff"></span><span class="pal-name">빈 Agent</span><label class="mini-switch"><input type="checkbox" checked><span class="tr"></span></label></div>
+        <div class="pal-item" data-color="#4353ff" data-tip="저장된 Agent 정의. JD와 증거 베이스로 이력서 초안을 작성합니다 (M2 임포트)"><span class="dot" style="background:#4353ff"></span><span class="pal-name">이력서 작성자</span><label class="mini-switch"><input type="checkbox" checked><span class="tr"></span></label></div>
+        <div class="pal-item" data-color="#4353ff" data-tip="저장된 Agent 정의. JD 대비 초안을 비평하고 JSON으로 채점합니다 (M2 임포트)"><span class="dot" style="background:#4353ff"></span><span class="pal-name">비평가</span><label class="mini-switch"><input type="checkbox" checked><span class="tr"></span></label></div>
+        <div class="pal-item off" data-color="#4353ff" data-tip="저장된 Agent 정의. 채점 스키마를 강제한 JSON을 출력합니다. 지금 비활성 — 행의 토글로 켤 수 있습니다"><span class="dot" style="background:#4353ff"></span><span class="pal-name">채점자</span><label class="mini-switch"><input type="checkbox"><span class="tr"></span></label></div>
+      </div>
+
+      <div class="pal-cat"><span class="dot" style="background:#6b7a90"></span>Input <span class="cnt">1</span><span class="caret">▸</span></div>
+      <div class="pal-children">
+        <div class="pal-item" data-color="#6b7a90" data-tip="파이프라인의 시작점. 문서 라이브러리의 JD·증거 문서를 데이터 흐름에 공급합니다"><span class="dot" style="background:#6b7a90"></span><span class="pal-name">빈 Input</span><label class="mini-switch"><input type="checkbox" checked><span class="tr"></span></label></div>
+      </div>
+
+      <div class="pal-cat"><span class="dot" style="background:#2f9e6e"></span>Output <span class="cnt">1</span><span class="caret">▸</span></div>
+      <div class="pal-children">
+        <div class="pal-item" data-color="#2f9e6e" data-tip="최종 마크다운을 HTML 템플릿으로 결정론적 렌더링. 자기완결형 HTML 1파일로 다운로드합니다"><span class="dot" style="background:#2f9e6e"></span><span class="pal-name">빈 Output</span><label class="mini-switch"><input type="checkbox" checked><span class="tr"></span></label></div>
+      </div>
+
+      <div class="pal-cat"><span class="dot" style="background:#d97917"></span>Gate <span class="cnt">2</span><span class="caret">▸</span></div>
+      <div class="pal-children">
+        <div class="pal-item" data-color="#d97917" data-tip="조건 분기. LLM 없이 코드로 조건식을 평가해 pass/fail 경로를 가릅니다"><span class="dot" style="background:#d97917"></span><span class="pal-name">빈 Gate</span><label class="mini-switch"><input type="checkbox" checked><span class="tr"></span></label></div>
+        <div class="pal-item" data-color="#d97917" data-tip="저장된 Gate. score >= 8 조건, fail 시 재작성 루프 (M2 임포트)"><span class="dot" style="background:#d97917"></span><span class="pal-name">점수 게이트</span><label class="mini-switch"><input type="checkbox" checked><span class="tr"></span></label></div>
+      </div>
+
+      <div class="pal-cat"><span class="dot" style="background:#e5484d"></span>Human <span class="cnt">1</span><span class="caret">▸</span></div>
+      <div class="pal-children">
+        <div class="pal-item" data-color="#e5484d" data-tip="사람 개입 지점. 실행이 멈추고 승인·편집을 기다립니다. 채팅 독에 대기 카드가 뜹니다"><span class="dot" style="background:#e5484d"></span><span class="pal-name">빈 Human</span><label class="mini-switch"><input type="checkbox" checked><span class="tr"></span></label></div>
+      </div>
+
+      <div class="pal-cat"><span class="dot" style="background:#b08fd8;border-radius:99px"></span>Skill <span class="cnt">2</span><span class="caret">▸</span></div>
+      <div class="pal-children">
+        <div class="pal-item" data-color="#b08fd8" data-tip="Agent에 장착하는 기술. 점선으로 Agent 상단에 연결합니다"><span class="dot" style="background:#b08fd8;border-radius:99px"></span><span class="pal-name">빈 Skill</span><label class="mini-switch"><input type="checkbox" checked><span class="tr"></span></label></div>
+        <div class="pal-item" data-color="#b08fd8" data-tip="저장된 Skill. 채점 JSON 스키마를 강제합니다 (M2 임포트)"><span class="dot" style="background:#b08fd8;border-radius:99px"></span><span class="pal-name">채점 스키마</span><label class="mini-switch"><input type="checkbox" checked><span class="tr"></span></label></div>
+      </div>
+
+      <div class="pal-cat"><span class="dot" style="background:#b08fd8;border-radius:99px"></span>Rule <span class="cnt">2</span><span class="caret">▸</span></div>
+      <div class="pal-children">
+        <div class="pal-item" data-color="#b08fd8" data-tip="Agent에 장착하는 규칙. 하나의 Rule을 여러 Agent에 공유 장착할 수 있습니다"><span class="dot" style="background:#b08fd8;border-radius:99px"></span><span class="pal-name">빈 Rule</span><label class="mini-switch"><input type="checkbox" checked><span class="tr"></span></label></div>
+        <div class="pal-item" data-color="#b08fd8" data-tip="저장된 Rule. 톤·수치화 규칙 — 성과는 반드시 숫자로 (M2 임포트)"><span class="dot" style="background:#b08fd8;border-radius:99px"></span><span class="pal-name">톤·수치화 규칙</span><label class="mini-switch"><input type="checkbox" checked><span class="tr"></span></label></div>
+      </div>
+
+      <div class="pal-cat"><span class="dot" style="background:#b08fd8;border-radius:99px"></span>Tool <span class="cnt">1</span><span class="caret">▸</span></div>
+      <div class="pal-children">
+        <div class="pal-item" data-color="#b08fd8" data-tip="Agent에 장착하는 도구. get_document(id)로 문서 라이브러리에 접근합니다"><span class="dot" style="background:#b08fd8;border-radius:99px"></span><span class="pal-name">get_document</span><label class="mini-switch"><input type="checkbox" checked><span class="tr"></span></label></div>
+      </div>
+
+      <h3>새 블록 트레이 <span class="tray-badge">1</span> <span style="font-weight:400">(M3)</span></h3>
+      <div class="pal-item" data-color="#b08fd8" data-tip="챗봇이 만든 블록. 캔버스로 드래그하거나 더블클릭하는 순간이 승인이며, 동시에 라이브러리에 저장됩니다. ✕는 거절(폐기)"><span class="dot" style="background:#b08fd8;border-radius:99px"></span><span class="pal-name">정량화 Rule</span><span style="color:#98a1b0">✕</span></div>
+    </div>
+
+    <!-- 팔레트 팝오버 (Q9b) — 설명 전용, 조작 버튼 없음 -->
+    <div class="popover" id="popover">
+      <h4 id="po-title"></h4>
+      <p id="po-desc"></p>
+      <div class="hint"><b>더블클릭</b> 또는 <b>드래그</b>로 캔버스에 추가 · 행의 토글로 활성/비활성</div>
+    </div>
+
+    <div class="rz rz-v" data-rz="palette" data-grow="left"></div>
+
+    <!-- 캔버스 -->
+    <div class="canvas-wrap">
+      <div class="canvas">
+        <div class="snapshot-hint">run #12 실행 중 — 지금 편집하면 다음 run에 반영</div>
+        <svg class="edges">
+          <path class="edge" d="M 188 158 C 230 158, 230 196, 268 196"/>
+          <path class="edge" d="M 188 278 C 230 278, 230 224, 268 224"/>
+          <path class="edge flow" d="M 436 210 C 470 210, 470 210, 504 210"/>
+          <path class="edge" d="M 672 210 C 706 210, 706 210, 740 210"/>
+          <path class="edge" d="M 890 196 C 924 196, 924 196, 958 196"/>
+          <path class="edge" d="M 1126 196 C 1160 196, 1160 196, 1194 196"/>
+          <path class="edge" d="M 815 262 C 815 330, 352 330, 352 262"/>
+          <text class="edge-label" x="560" y="322">fail → 재작성 (최대 3회)</text>
+          <text class="edge-label" x="900" y="188">pass</text>
+          <path class="edge mount" d="M 385 92 C 370 110, 360 125, 352 142"/>
+          <path class="edge mount" d="M 450 92 C 510 110, 560 125, 588 142"/>
+          <path class="edge mount" d="M 630 92 C 620 110, 605 125, 598 142"/>
+        </svg>
+
+        <div class="pill" style="left:330px; top:64px"><span class="tag">RULE</span>톤·수치화 규칙<span class="h-bottom"></span></div>
+        <div class="pill" style="left:575px; top:64px"><span class="tag">SKILL</span>채점 스키마<span class="h-bottom"></span></div>
+
+        <div class="node st-success" style="left:20px; top:130px">
+          <header class="hd-input">📄 INPUT</header>
+          <div class="body"><div class="name">JD — 백엔드 시니어</div>
+            <div class="desc">문서: jd-kakao-2026</div><div class="status">● 성공</div></div>
+          <span class="h-output"></span>
+        </div>
+        <div class="node st-success" style="left:20px; top:250px">
+          <header class="hd-input">📄 INPUT</header>
+          <div class="body"><div class="name">증거 베이스</div>
+            <div class="desc">experience-bank 외 3</div><div class="status">● 성공</div></div>
+          <span class="h-output"></span>
+        </div>
+        <div class="node st-success" style="left:268px; top:168px">
+          <header class="hd-agent">🤖 AGENT</header>
+          <div class="body"><div class="name">이력서 작성자</div>
+            <div class="desc">갭 발견 시: 멈추고 묻기</div><div class="status">● 성공 · 2회차</div></div>
+          <span class="h-input"></span><span class="h-output"></span><span class="h-top"></span>
+        </div>
+        <div class="node st-running" style="left:504px; top:168px">
+          <header class="hd-agent">🤖 AGENT</header>
+          <div class="body"><div class="name">비평가·채점자</div>
+            <div class="desc">출력: JSON (score, issues)</div><div class="status">● 실행 중…</div></div>
+          <span class="h-input"></span><span class="h-output"></span><span class="h-top"></span>
+        </div>
+        <div class="node gate st-idle" style="left:740px; top:172px">
+          <header class="hd-gate">◆ GATE</header>
+          <div class="body"><div class="name">score &gt;= 8</div>
+            <div class="desc">fail → 작성자 재실행</div><div class="status">● 대기</div></div>
+          <span class="h-input"></span><span class="h-output"></span>
+        </div>
+        <div class="node st-waiting" style="left:958px; top:154px">
+          <header class="hd-human">🙋 HUMAN</header>
+          <div class="body"><div class="name">최종 검토</div>
+            <div class="desc">편집 허용 · 승인 대기</div><div class="status">● 사람 대기 중</div></div>
+          <span class="h-input"></span><span class="h-output"></span>
+        </div>
+        <div class="node st-idle" style="left:1194px; top:160px">
+          <header class="hd-output">📦 OUTPUT</header>
+          <div class="body"><div class="name">HTML 렌더</div>
+            <div class="desc">템플릿: DESIGN.md 스타일</div><div class="status">● 대기</div>
+            <button data-tip="완성된 이력서 다운로드 자리. Output 노드가 성공하면 활성화됩니다. 노드를 클릭하면 사이드 패널에서 미리보기 후 받을 수도 있습니다" style="margin-top:6px;width:100%;border:1px solid #dde1e8;background:#fafbfc;border-radius:6px;padding:4px 0;color:#98a1b0;font-size:11.5px" disabled>⬇ HTML 다운로드</button></div>
+          <span class="h-input"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="rz rz-v" data-rz="sidepanel" data-grow="right"></div>
+
+    <!-- 사이드 패널 -->
+    <div class="sidepanel" id="sidepanel">
+      <div class="sp-tabs">
+        <button id="sp-prop" onclick="spTab('prop')">속성</button>
+        <button id="sp-art" class="active" onclick="spTab('art')">아티팩트</button>
+      </div>
+      <div class="sp-body" id="sp-body-art">
+        <div class="sp-node-title"><span class="dot" style="background:#4353ff"></span>비평가·채점자</div>
+        <div class="stream-chip">스트리밍 중</div>
+        <div class="rounds"><span data-tip="루프 1회차의 아티팩트 보기">1회차</span><span class="on" data-tip="현재 스트리밍 중인 회차">2회차</span></div>
+        <div class="artifact">
+          <h4>비평 결과 (JSON)</h4>
+          score: <b style="color:#d97917">7</b> / PASS 기준 8<br>
+          issues:<br>
+          · 성과 수치가 두 번째 경력에 없음<br>
+          · 리드 경험이 JD 요구와 연결 안 됨<br>
+          <span class="cursor"></span>
+        </div>
+      </div>
+      <div class="sp-body" id="sp-body-prop" style="display:none">
+        <div class="sp-node-title"><span class="dot" style="background:#4353ff"></span>비평가·채점자</div>
+        <div class="field"><label data-tip="노드 표시 이름">이름</label><div class="box">비평가·채점자</div></div>
+        <div class="field"><label data-tip="이 에이전트의 역할을 정의하는 시스템 프롬프트. doc: 접두사로 문서 라이브러리의 문서를 포인터로 삽입할 수 있습니다">역할</label><div class="box">JD(doc:jd-kakao-2026)에 비추어 초안을 비평하고 …</div></div>
+        <div class="field"><label data-tip="아티팩트 형태. 산문은 마크다운, 채점은 JSON">출력 형식</label><div class="box">JSON ▾</div></div>
+        <div class="field"><label data-tip="캔버스에서 점선으로 장착된 블록들. 배선 변경은 캔버스에서">장착됨</label><div class="box">SKILL 채점 스키마 · RULE 톤·수치화 규칙</div></div>
+        <details class="adv">
+          <summary data-tip="자주 바꾸지 않는 설정. 기본값으로 두면 됩니다">고급 설정</summary>
+          <div class="field"><label>모델</label><div class="box">claude-sonnet-4-6 ▾</div></div>
+          <div class="field"><label data-tip="JSON 출력의 구조를 강제하는 스키마">JSON 스키마</label><div class="box">{ score: number, issues: string[] }</div></div>
+          <div class="field"><label data-tip="증거가 부족한 갭을 발견했을 때의 행동">갭 인터뷰 모드</label><div class="box">[확인 필요] 표시하고 계속 ▾</div></div>
+        </details>
+        <div class="pal-note" style="margin-top:10px">⚠ 실행 중 — 수정은 다음 run에 반영됩니다</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 문서 탭 ═══ -->
+  <div class="view" id="view-docs">
+    <div class="docs">
+      <div class="doc-list" id="doclist">
+        <h3 style="font-size:11px;color:#7a8494;margin-bottom:8px">문서 라이브러리</h3>
+        <div class="doc-item on">experience-bank.md</div>
+        <div class="doc-item">profile.md</div>
+        <div class="doc-item">positioning.md</div>
+        <div class="doc-item">canonical-lines.md</div>
+        <div class="doc-item">jd-kakao-2026.md</div>
+        <div class="doc-item" style="color:#4353ff">+ 새 문서</div>
+      </div>
+      <div class="rz rz-v" data-rz="doclist" data-grow="left"></div>
+      <div class="doc-edit">
+        <b>experience-bank.md</b>
+        <textarea># 경험 은행
+
+## 결제 시스템 재설계 (2024)
+- 일 340만 건 트랜잭션 처리 파이프라인을 재설계
+- p99 레이턴시 1.2s → 180ms
+…</textarea>
+      </div>
+      <div class="rz rz-v" data-rz="docversions" data-grow="right"></div>
+      <div class="doc-versions" id="docversions">
+        <h3 style="font-size:11px;color:#7a8494;margin-bottom:8px">버전 히스토리</h3>
+        <div class="ver"><b>v7 · 사람</b>2026-07-22 14:03<br>결제 성과 수치 보강</div>
+        <div class="ver"><b>v6 · LLM (갭 인터뷰)</b>2026-07-21 10:11<br>리드 경험 2건 추가</div>
+        <div class="ver"><b>v5 · 사람</b>2026-07-18 09:40</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="rz rz-h" data-rz="chatdock"></div>
+
+<!-- 채팅 독 -->
+<div class="chatdock" id="chatdock">
+  <div class="chat-head">채팅 · 이력서 파이프라인 v1
+    <button onclick="document.getElementById('chatdock').classList.toggle('collapsed')">접기 ▾</button>
+  </div>
+  <div class="chat-stream">
+    <div class="card run"><div class="k">RUN #12 시작</div>그래프 스냅샷 생성 · 7개 노드 · 10:42</div>
+    <div class="card gatefail"><div class="k">게이트 실패 · 1회차</div>score 6 &lt; 8 — "성과 수치 부족" → 작성자 재실행 (2/3회)</div>
+    <div class="card human">
+      <div class="k">🙋 사람 대기 — 최종 검토</div>
+      초안 v2가 준비되었습니다. "결제 시스템 재설계를 주도하여 p99를 180ms로…"
+      <div class="actions"><button>사이드 패널에서 열기</button><button class="primary">승인</button></div>
+    </div>
+  </div>
+  <div class="chat-input">
+    <input placeholder="블록을 만들어 달라고 하거나, '작성해줘'로 실행 (M3)" disabled>
+    <button disabled style="opacity:.5">전송</button>
+    <span class="m3-note">M2: 이벤트 스트림만 · M3: 입력 활성화</span>
+  </div>
+</div>
+
+<script>
+function showView(v) {
+  document.getElementById('view-canvas').classList.toggle('active', v === 'canvas');
+  document.getElementById('view-docs').classList.toggle('active', v === 'docs');
+  document.getElementById('tab-canvas').classList.toggle('active', v === 'canvas');
+  document.getElementById('tab-docs').classList.toggle('active', v === 'docs');
+  closePopover();
+}
+function spTab(t) {
+  document.getElementById('sp-body-art').style.display = t === 'art' ? '' : 'none';
+  document.getElementById('sp-body-prop').style.display = t === 'prop' ? '' : 'none';
+  document.getElementById('sp-art').classList.toggle('active', t === 'art');
+  document.getElementById('sp-prop').classList.toggle('active', t === 'prop');
+}
+
+/* ── 팔레트 트리 (Q10-B): 타입 클릭 = 하위 항목 펼침 ── */
+document.querySelectorAll('.pal-cat').forEach(cat => {
+  cat.addEventListener('click', () => { cat.classList.toggle('open'); closePopover(); });
+});
+
+/* ── 하위 항목: 클릭 = 상세 팝오버(설명만) · 더블클릭 = 캔버스에 추가 · 행 토글 = 활성/비활성 ── */
+const popover = document.getElementById('popover');
+let currentItem = null, addCount = 0;
+document.querySelectorAll('.pal-item').forEach(item => {
+  item.addEventListener('click', e => {
+    e.stopPropagation();
+    if (e.target.closest('.mini-switch')) return; // 토글 클릭은 팝오버 열지 않음
+    if (currentItem === item) return closePopover();
+    currentItem = item;
+    document.querySelectorAll('.pal-item').forEach(i => i.classList.remove('selected'));
+    item.classList.add('selected');
+    document.getElementById('po-title').innerHTML =
+      item.querySelector('.dot').outerHTML + item.querySelector('.pal-name').textContent;
+    document.getElementById('po-desc').textContent = item.getAttribute('data-tip');
+    const r = item.getBoundingClientRect();
+    popover.style.left = (r.right + 10) + 'px';
+    popover.style.top = Math.min(r.top, innerHeight - 180) + 'px';
+    popover.classList.add('open');
+  });
+  item.addEventListener('dblclick', e => {
+    e.stopPropagation();
+    if (item.classList.contains('off')) return; // 비활성은 추가 불가
+    addNodeToCanvas(item.querySelector('.pal-name').textContent, item.dataset.color || '#6b7a90');
+    closePopover();
+  });
+  const sw = item.querySelector('.mini-switch input');
+  if (sw) sw.addEventListener('change', () => item.classList.toggle('off', !sw.checked));
+});
+function addNodeToCanvas(name, color) {
+  const canvas = document.querySelector('.canvas');
+  const n = document.createElement('div');
+  n.className = 'node st-idle';
+  n.style.left = (420 + (addCount % 3) * 190) + 'px';
+  n.style.top = (400 + Math.floor(addCount / 3) * 90) + 'px';
+  n.innerHTML = '<header style="background:' + color + '">＋ ' + name.toUpperCase() +
+    '</header><div class="body"><div class="name">' + name + '</div>' +
+    '<div class="desc">방금 추가됨 — 배선하세요</div><div class="status">● 대기</div></div>' +
+    '<span class="h-input"></span><span class="h-output"></span>';
+  n.style.boxShadow = '0 0 0 3px #4353ff66';
+  canvas.appendChild(n);
+  setTimeout(() => n.style.boxShadow = '', 1200);
+  addCount++;
+}
+function closePopover() {
+  popover.classList.remove('open');
+  document.querySelectorAll('.pal-item').forEach(i => i.classList.remove('selected'));
+  currentItem = null;
+}
+document.addEventListener('click', e => {
+  if (!popover.contains(e.target)) closePopover();
+});
+
+/* ── 패널 드래그 리사이즈 (Q9a) ── */
+document.querySelectorAll('.rz').forEach(rz => {
+  rz.addEventListener('mousedown', e => {
+    e.preventDefault();
+    const target = document.getElementById(rz.dataset.rz);
+    const vertical = rz.classList.contains('rz-v');
+    const start = vertical ? e.clientX : e.clientY;
+    const startSize = vertical ? target.offsetWidth : target.offsetHeight;
+    rz.classList.add('dragging');
+    function move(ev) {
+      const d = (vertical ? ev.clientX : ev.clientY) - start;
+      if (vertical) {
+        const grow = rz.dataset.grow === 'left' ? 1 : -1; // 분할선 기준 왼쪽 패널인지
+        target.style.width = (startSize + grow * d) + 'px';
+      } else { target.classList.remove('collapsed'); target.style.height = (startSize - d) + 'px'; }
+    }
+    function up() {
+      rz.classList.remove('dragging');
+      removeEventListener('mousemove', move); removeEventListener('mouseup', up);
+    }
+    addEventListener('mousemove', move); addEventListener('mouseup', up);
+  });
+});
+</script>
+</body>
+</html>

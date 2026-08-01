@@ -1,0 +1,96 @@
+# recruit-flow
+
+JD + 파이프라인 조립 → 이력서 HTML을 만드는 로컬 웹앱. 레고처럼 조립
+가능한 파이프라인 UI로, LLM 챗봇은 블록을 만들고 조립은 사람이 한다.
+
+스택: Next.js(App Router) + React Flow(@xyflow/react) + SQLite/Drizzle
+(better-sqlite3) + Zustand + SSE + Claude Agent SDK(TypeScript).
+
+## 스펙 = 진실의 원천
+
+구현 관련 모든 판단은 스펙 문서가 우선한다. 코드와 스펙이 어긋나면
+스펙이 맞고, 스펙을 바꿔야 하면 **먼저 스펙을 수정하고 사용자 승인 후**
+코드를 바꾼다.
+
+- `recruit-flow-blueprint.md` — 12개 결정, 마일스톤 M1~M3
+- `specs/ui.md` (+ `specs/ui-mockup.html` 시각 기준)
+- `specs/nodes.md` — 8종 노드 계약
+- `specs/schema.md` — 9개 테이블
+- `specs/engine.md` — 러너·API·SSE
+
+## 팀 구성 (.claude/agents)
+
+| 에이전트 | 모델 | 담당 | 성격 |
+| --- | --- | --- | --- |
+| architect | opus | 작업 분해·설계 검토·스펙 공백 판정 | 읽기 전용 |
+| engine-builder | opus | 러너·Agent SDK 통합·SSE·run API | 구현 |
+| ui-builder | sonnet | 캔버스·팔레트·패널·채팅 독·문서 탭 | 구현 |
+| api-db-builder | sonnet | Drizzle 스키마·CRUD 라우트·검증 함수·임포터 | 구현 |
+| code-reviewer | opus | 스펙 위반·버그·영역 침범 판정 | 읽기 전용 게이트 |
+| qa-verifier | sonnet | 앱 실기동 시나리오 검증 | 실동작 게이트 |
+| chore-runner | haiku | 의존성·설정·리네임·마이그레이션 실행 | 기계적 잡무 |
+
+모델 배정 원칙: 판단·동시성·통합의 난도가 높은 곳(설계, 러너, 리뷰
+게이트)은 opus, 스펙이 계약을 다 정해준 구현은 sonnet, 판단이 없는
+잡무는 haiku.
+
+## 오케스트레이션
+
+**메인 세션이 오케스트레이터다.** 빌더끼리 직접 통신하지 않는다 — 모든
+조율·순서 결정·결과 전달은 메인 세션이 한다.
+
+### 기능 단위 표준 플로우
+
+```
+architect(분해·계획)
+   → 빌더 구현 (독립 영역이면 병렬, 같은 파일을 건드리면 worktree 격리)
+   → code-reviewer(게이트: 승인/수정 필요)
+   → 수정 필요 시 해당 빌더로 반환 (리뷰-수정 루프)
+   → qa-verifier(실동작 검증)
+   → 완료
+```
+
+- 사소한 단일 파일 수정은 architect·리뷰를 생략할 수 있다. 러너·SDK·
+  스키마를 건드리면 생략 금지.
+- 빌더는 자기 "소유하지 않는 영역"을 수정하지 않는다. 경계 파일(API
+  계약 등)이 걸리면 메인 세션이 조정.
+
+### 마일스톤 의존 순서 (M1 기준)
+
+1. chore-runner: 스캐폴딩(Next.js·의존성·설정) — 단, 최초 구조 결정은
+   architect 계획 후
+2. api-db-builder: 스키마·마이그레이션·pipelines/graph/documents CRUD
+3. 병렬: ui-builder(셸·캔버스·문서 탭) ∥ engine-builder(러너·SDK·SSE)
+   — 2의 스키마·API 계약이 나온 뒤에
+4. 통합: run 시작→스트리밍→다운로드 연결
+5. code-reviewer → qa-verifier(M1 시나리오) → M1 완료 선언
+
+### 마일스톤 경계
+
+빌더가 현재 마일스톤 밖 기능을 미리 만드는 것 금지(리뷰에서 걸러냄).
+v2 연기 목록(블루프린트)은 제안도 하지 않는다.
+
+## 런타임 — Node 22 (중요)
+
+시스템 전역 Node는 23.1.0(non-LTS)이며, better-sqlite3 prebuild가
+ABI 불일치로 **세그폴트**한다. 이 머신의 nvm-windows는 새 버전 설치가
+고장나 있어, Node 22 LTS를 **프로젝트 로컬**(`.node22/`, gitignore)에
+설치해 우회했다. 전역 Node는 건드리지 않았다(다른 프로젝트 무영향).
+
+**모든 node/npm/npx 명령은 프로젝트 로컬 Node 22를 써야 한다:**
+
+- Bash(Git Bash): `export PATH="/c/workspaces/recruit-flow/.node22:$PATH"`
+  를 명령 앞에 두고 `node`/`npm` 실행.
+- PowerShell: `& "C:\workspaces\recruit-flow\.node22\node.exe"` /
+  `.node22\npm.cmd` 직접 호출, 또는 `$env:PATH` 앞에 `.node22` 추가.
+
+전역 `node`(23)로 실행하면 DB 로드 시 세그폴트한다. 검증(`npm run
+build`, dev 서버, 마이그레이션)도 반드시 Node 22로.
+
+## 컨벤션
+
+- UI 문구·주석·문서: 한국어. 코드 식별자: 영어.
+- TypeScript strict. 타입체크 통과가 모든 작업의 최소 완료 조건.
+- DB 파일 `data/recruit-flow.db`(gitignore), 스키마 변경은 반드시
+  drizzle-kit 마이그레이션으로.
+- 이 저장소는 독립 git 저장소다(부모 `C:\workspaces` 저장소와 분리).

@@ -1,0 +1,73 @@
+.wrap {
+  flex: 1;
+  min-width: 200px;
+  position: relative;
+}
+
+/* 점 격자 배경(목업 radial-gradient). */
+.wrap :global(.react-flow) {
+  background: var(--bg);
+}
+.wrap :global(.react-flow__background) {
+  background: var(--bg);
+}
+
+/* 실선/흐름 엣지 색(ui.md §2 — M1 실선). */
+.wrap :global(.react-flow__edge-path) {
+  stroke: #9aa4b5;
+  stroke-width: 2;
+}
+.wrap :global(.react-flow__edge.running .react-flow__edge-path) {
+  stroke: var(--st-running);
+  stroke-dasharray: 7 5;
+  animation: rf-dash 1s linear infinite;
+}
+
+.rzHandleNote {
+  display: none;
+}
+
+/* 스냅샷 힌트 배지 */
+.snapshotHint {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 5px 10px;
+  font-size: 11px;
+  color: var(--text-dim);
+  z-index: 10;
+  pointer-events: none;
+}
+
+/* 우클릭 컨텍스트 메뉴 */
+.contextMenu {
+  position: fixed;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(15, 22, 40, 0.18);
+  padding: 4px;
+  z-index: 200;
+  min-width: 160px;
+}
+.contextMenu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 7px 12px;
+  border-radius: 5px;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.contextMenu button:hover {
+  background: #f2f4f8;
+}
+.contextMenu button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
