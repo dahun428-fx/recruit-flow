@@ -617,6 +617,15 @@ export function setBlockDefEnabled(id: string, enabled: boolean): BlockDef | nul
   return getBlockDef(id);
 }
 
+/**
+ * 트레이 승인(tray:false) 또는 트레이 대기(tray:true) 토글.
+ * 챗봇이 add_block으로 트레이에 넣은 블록을 캔버스 드래그로 승인할 때 사용.
+ */
+export function setBlockDefTray(id: string, tray: boolean): BlockDef | null {
+  db.update(blockDefs).set({ tray }).where(eq(blockDefs.id, id)).run();
+  return getBlockDef(id);
+}
+
 export function deleteBlockDef(id: string): boolean {
   const res = db.delete(blockDefs).where(eq(blockDefs.id, id)).run();
   return res.changes > 0;

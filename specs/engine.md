@@ -47,13 +47,16 @@ Next 서버 프로세스 내 싱글턴, 인메모리 큐 + 이벤트 구동 루�
 | `POST /api/runs/[id]/cancel` | 중단 |
 | `POST /api/node-runs/[id]/approve` | Human 승인. body에 편집본 옵션. 채팅 카드/사이드 패널 공용(Q14) |
 | `POST /api/node-runs/[id]/answer` | 갭 인터뷰 답변 — 대기 중인 `ask_human` tool 결과로 전달 |
-| `GET /api/runs/[id]/events` | SSE 스트림 |
+| `GET /api/runs/[id]/events` | run 스코프 SSE(캔버스·아티팩트) |
 | `GET /api/artifacts/[id]/download` | Output HTML 다운로드 |
-| documents / block_defs / chat CRUD | 통상적 REST (`/api/documents`, `/api/block-defs`, `/api/pipelines/[id]/messages`) |
+| documents / block_defs CRUD | 통상적 REST. block_defs: `POST /api/block-defs`, `PATCH /api/block-defs/[id]` `{tray?,enabled?}`(트레이 승인·큐레이션), `DELETE`(거절) — M3 |
+| `POST /api/pipelines/[id]/chat` | **M3.** body `{text}`. user 메시지 저장 → 챗봇 `runChat` 기동 → 즉시 200. assistant 델타·확정은 pipeline SSE로(fire-and-forget) |
+| `GET /api/pipelines/[id]/events` | **M3.** 파이프라인 스코프 SSE(채팅 독). run 유무 무관 상시 연결. `chat_delta`·`chat_message`·`chat_card`(run 미러) |
+| `GET /api/pipelines/[id]/messages` | 채팅 히스토리 조회(새로고침 복원) |
 
 ## 3. SSE 이벤트
 
-이벤트 4종. **SSE는 통지, 진실의 원천은 DB** — 클라이언트는 접속 시
+run 스코프 3종 + M3 채팅 3종. **SSE는 통지, 진실의 원천은 DB** — 클라이언트는 접속 시
 REST(`GET /api/runs/[id]`)로 상태를 읽고 SSE 구독, 끊기면 재접속 시
 REST 재조회.
 
@@ -62,7 +65,19 @@ REST 재조회.
 | `run_status` | run_id, status, 진행(완료/전체 노드 수) | 상단 바, run 보고 카드 |
 | `node_status` | node_id, node_run_id, iteration, status | 캔버스 노드 색·점멸, 회차 칩 |
 | `artifact_delta` | node_run_id, 텍스트 조각 | 사이드 패널 스트리밍 |
-| `chat_card` | chat_message 행 | 채팅 독 카드 추가 |
+| `chat_card` | chat_message 행 (card_run/card_human) | 채팅 독 카드. run 스코프 + **pipeline 채널 미러**(M3) |
+| `chat_delta` (M3) | messageId, 텍스트 조각 | 채팅 독 챗봇 응답 스트리밍(통지 전용 — DB엔 완료 시 1건만) |
+| `chat_message` (M3) | 확정된 chat_message(user/assistant/card_block) | 채팅 독 메시지 확정 |
+
+**M3 채널 구조**: run SSE(`/api/runs/[id]/events`)는 캔버스 노드 색·
+아티팩트 스트리밍 전용(runId 스코프). pipeline SSE(`/api/pipelines/[id]/
+events`)는 채팅 독 전용(pipelineId 스코프) — 챗봇 응답·카드가 활성 run
+없이도 흐른다. card_run/card_human은 양쪽에 미러돼 ChatDock의 단일
+pipeline 구독에 run 이벤트와 챗봇 응답이 한 스트림으로 도달(ui.md Q6).
+
+**챗봇 스트리밍 저장**(M3): chat_delta는 통지 전용, 진실은 완료 시
+확정되는 assistant chat_message 1건(진행 중 델타는 새로고침 시 유실
+허용 — 채팅 응답은 짧아 중단 복원 불요).
 
 아티팩트 스트리밍 저장: 조각은 메모리 버퍼에 모으고 주기적으로(예:
 1초) artifacts.content에 flush, 완료 시 확정(schema.md).
@@ -73,4 +88,8 @@ REST 재조회.
   events/download 라우트, `run_status`·`node_status`·`artifact_delta`.
 - **M2**: 병렬(한도 2)·Gate 루프·waiting_human·approve/answer·부분
   재실행·`chat_card`.
-- **M3**: chat 라우트 + 챗봇(블록 add tool, 실행 트리거).
+- **M3**: 파이프라인 스코프 SSE(`/pipelines/[id]/events`) + chat 라우트
+  (`POST /pipelines/[id]/chat`) + 챗봇 `runChat()`(add_block→트레이·
+  register_document·trigger_run + 읽기 tool, **쓰기는 add-only 결정 5**) +
+  block_defs POST/PATCH/DELETE(트레이 승인·거절) + 갭 인터뷰 인라인 답변.
+  `chat_delta`·`chat_message`·`chat_card` pipeline 미러. 상세: m3-plan.md.

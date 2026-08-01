@@ -5,6 +5,7 @@
   border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
+  height: 205px;
   min-height: 90px;
   max-height: 60vh;
 }
@@ -63,6 +64,47 @@
   margin-bottom: 3px;
 }
 
+/* 사용자 텍스트 — 오른쪽 정렬 */
+.user {
+  background: #eef1ff;
+  border-color: #c5ccf8;
+  align-self: flex-end;
+  max-width: 480px;
+}
+.user .text {
+  font-size: 12.5px;
+  color: #2a3060;
+  line-height: 1.5;
+}
+
+/* 챗봇 응답 */
+.assistant {
+  background: #f8f9fc;
+  border-color: var(--border);
+}
+.assistant .kind {
+  color: var(--c-agent);
+}
+.assistant .text {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+/* 스트리밍 커서 */
+.cursor {
+  display: inline-block;
+  width: 7px;
+  height: 13px;
+  background: var(--c-agent);
+  vertical-align: -2px;
+  animation: blink 1s step-end infinite;
+}
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
 /* run 카드 */
 .run {
   background: #f2fbf6;
@@ -90,6 +132,35 @@
   color: var(--c-human);
 }
 
+/* block 생성 카드 */
+.block {
+  background: #f6f1fc;
+  border-color: #d8c8ef;
+}
+.block .kind {
+  color: #6d4d9c;
+}
+.blockName {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #1f2430;
+  margin-top: 3px;
+}
+.blockType {
+  font-size: 10px;
+  background: #b08fd8;
+  color: #fff;
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin-right: 6px;
+  font-weight: 700;
+}
+
+.text {
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
 .instruction {
   font-size: 11.5px;
   color: var(--text-dim);
@@ -113,6 +184,7 @@
   margin-top: 7px;
   display: flex;
   gap: 6px;
+  flex-wrap: wrap;
 }
 .actions button {
   border: 1px solid var(--border);
@@ -140,6 +212,26 @@
   font-weight: 600;
 }
 
+/* gap_question 인라인 입력 */
+.gapArea {
+  margin-top: 6px;
+}
+.gapInput {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  background: #fafbfc;
+  color: var(--text);
+}
+.gapInput:disabled {
+  opacity: 0.6;
+}
+
 /* 입력창 */
 .input {
   flex: none;
@@ -156,6 +248,11 @@
   padding: 8px 12px;
   background: #fafbfc;
   font: inherit;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.input input:disabled {
+  opacity: 0.5;
 }
 .input button {
   border: 0;
@@ -165,11 +262,12 @@
   padding: 0 18px;
   font-weight: 600;
   height: 36px;
-}
-.m3note {
-  font-size: 10.5px;
-  color: var(--text-faint);
+  cursor: pointer;
   white-space: nowrap;
+}
+.input button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* Human 카드 스크롤 하이라이트 */

@@ -1,8 +1,8 @@
 // 캔버스 탭 본체 — 팔레트 | React Flow 캔버스 | 사이드 패널 3분할.
-// M2b: 스냅샷 모드, Human 클릭 → 채팅 독 스크롤.
+// M3: 트레이 승인(U3), card_run started → run 연동(U6).
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { api } from "@/lib/api";
 import { useCanvasStore } from "@/store/canvas";
@@ -16,7 +16,8 @@ import { Palette } from "./Palette";
 import { Canvas, addBlockAtDefault } from "./Canvas";
 import { SidePanel } from "@/components/panel/SidePanel";
 import { Resizer } from "@/components/shell/Resizer";
-import type { NodeType } from "@/lib/types";
+import type { BlockDef, NodeType } from "@/lib/types";
+import { makeNode } from "./blocks";
 import styles from "./PipelineView.module.css";
 
 interface Props {
@@ -59,7 +60,6 @@ export function PipelineView({ pipelineId, onScrollToHumanCard }: Props) {
         setPipeline(pipelineId, graph.nodes, graph.edges);
         setLoaded(true);
         api.touchPipeline(pipelineId).catch(() => {});
-        // 새로고침 복원: localStorage에 기억된 활성 run.
         setActiveRunId(recallActiveRun(pipelineId));
       } catch {
         if (!cancelled) setLoaded(true);
@@ -73,9 +73,6 @@ export function PipelineView({ pipelineId, onScrollToHumanCard }: Props) {
   // 스냅샷 run 변경 시 해당 run의 상태 로드
   useEffect(() => {
     if (!snapshotRunId) return;
-    // 스냅샷 run의 그래프 스냅샷이 있으면 로드(engine.md §snapshot).
-    // 현재 엔진은 graphSnapshot을 저장하나, 여기서는 현재 그래프에 상태색만 표시.
-    // RunState 로드 → initRun
     fetch(`/api/runs/${snapshotRunId}`)
       .then((r) => r.json())
       .then((state) => {
@@ -115,10 +112,52 @@ export function PipelineView({ pipelineId, onScrollToHumanCard }: Props) {
 
   // 더블클릭 추가 — 기존 노드 수 기준 배치.
   const onAddBlock = useCallback(
-    (type: NodeType) => {
+    (type: NodeType, blockDef?: BlockDef) => {
       const count = useCanvasStore.getState().nodes.length;
       const node = addBlockAtDefault(pipelineId, type, count);
-      addNode(node);
+      // blockDef 정의가 있으면 config/name 복사
+      if (blockDef) {
+        addNode({ ...node, name: blockDef.name, config: blockDef.config });
+      } else {
+        addNode(node);
+      }
+      save();
+    },
+    [pipelineId, addNode, save],
+  );
+
+  // U3: 트레이 항목 드래그 드롭 승인
+  const onTrayDrop = useCallback(
+    async (blockDefId: string, pos: { x: number; y: number }) => {
+      // blockDef 조회
+      try {
+        const res = await fetch(`/api/block-defs?all=1`);
+        const defs: BlockDef[] = await res.json();
+        const def = defs.find((d) => d.id === blockDefId);
+        if (!def) return;
+        // tray:false 처리(승인)
+        await fetch(`/api/block-defs/${blockDefId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tray: false }),
+        });
+        // 노드 생성
+        const node = makeNode(pipelineId, def.type, pos.x, pos.y);
+        addNode({ ...node, name: def.name, config: def.config });
+        save();
+      } catch {
+        // 무시
+      }
+    },
+    [pipelineId, addNode, save],
+  );
+
+  // U3: 팔레트 onApproveTray(더블클릭 승인) — 캔버스 기본 위치에 배치
+  const onApproveTray = useCallback(
+    (def: BlockDef) => {
+      const count = useCanvasStore.getState().nodes.length;
+      const node = addBlockAtDefault(pipelineId, def.type, count);
+      addNode({ ...node, name: def.name, config: def.config });
       save();
     },
     [pipelineId, addNode, save],
@@ -149,7 +188,10 @@ export function PipelineView({ pipelineId, onScrollToHumanCard }: Props) {
         {!isSnapshot && (
           <>
             <div style={{ width: palette.size, flex: "none" }}>
-              <Palette onAddBlock={onAddBlock} />
+              <Palette
+                onAddBlock={onAddBlock}
+                onApproveTray={onApproveTray}
+              />
             </div>
             <Resizer vertical onMouseDown={palette.onMouseDown(true)} />
           </>
@@ -159,6 +201,7 @@ export function PipelineView({ pipelineId, onScrollToHumanCard }: Props) {
           onDownload={onDownload}
           onHumanClick={onHumanClick}
           readOnly={isSnapshot}
+          onTrayDrop={onTrayDrop}
         />
 
         <Resizer vertical onMouseDown={side.onMouseDown(true)} />
@@ -169,3 +212,5 @@ export function PipelineView({ pipelineId, onScrollToHumanCard }: Props) {
     </ReactFlowProvider>
   );
 }
+
+export { type Props as PipelineViewProps };

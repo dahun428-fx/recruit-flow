@@ -35,7 +35,7 @@ import { EXEC_NODE_TYPES, MOUNT_NODE_TYPES } from "@/lib/types";
 import { FlowNode, type FlowNodeData } from "./FlowNode";
 import { PillNode, type PillNodeData } from "./PillNode";
 import { MountEdge } from "./MountEdge";
-import { DRAG_MIME, parseDropType } from "./Palette";
+import { DRAG_MIME, TRAY_DRAG_MIME, parseDropType } from "./Palette";
 import { makeNode } from "./blocks";
 import styles from "./Canvas.module.css";
 
@@ -71,6 +71,8 @@ interface Props {
   onHumanClick?: (nodeId: string) => void;
   /** 읽기 전용 스냅샷 모드. */
   readOnly?: boolean;
+  /** 트레이 드래그 드롭 승인 시 blockDefId 전달 */
+  onTrayDrop?: (blockDefId: string, pos: { x: number; y: number }) => void;
 }
 
 interface ContextMenu {
@@ -79,7 +81,7 @@ interface ContextMenu {
   y: number;
 }
 
-export function Canvas({ onDownload, onHumanClick, readOnly }: Props) {
+export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop }: Props) {
   const pipelineId = useCanvasStore((s) => s.pipelineId);
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
@@ -303,6 +305,15 @@ export function Canvas({ onDownload, onHumanClick, readOnly }: Props) {
     (e: React.DragEvent) => {
       e.preventDefault();
       if (!pipelineId || readOnly) return;
+
+      // U3: 트레이 드래그
+      const trayId = e.dataTransfer.getData(TRAY_DRAG_MIME);
+      if (trayId) {
+        const pos = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+        onTrayDrop?.(trayId, { x: Math.round(pos.x), y: Math.round(pos.y) });
+        return;
+      }
+
       const key = e.dataTransfer.getData(DRAG_MIME);
       if (!key) return;
       const type = parseDropType(key);
@@ -317,7 +328,7 @@ export function Canvas({ onDownload, onHumanClick, readOnly }: Props) {
       addNode(node);
       scheduleSave();
     },
-    [pipelineId, rf, addNode, scheduleSave, readOnly],
+    [pipelineId, rf, addNode, scheduleSave, readOnly, onTrayDrop],
   );
 
   const onDragOver = useCallback((e: React.DragEvent) => {

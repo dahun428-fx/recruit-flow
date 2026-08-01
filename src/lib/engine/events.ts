@@ -15,8 +15,14 @@ import type {
 type Subscriber = (event: SseEvent) => void;
 
 class RunEventBus {
-  /** runId → subscriber 집합. */
+  /** runId → subscriber 집합(캔버스·아티팩트 SSE — run 스코프). */
   private subscribers = new Map<string, Set<Subscriber>>();
+  /**
+   * pipelineId → subscriber 집합(채팅 독 SSE — pipeline 스코프, M3).
+   * run 유무와 무관하게 상시 연결. 챗봇 응답·트레이 카드 + card_run/human 미러가
+   * 이 채널로 흐른다(engine.md §3 M3 채널 구조).
+   */
+  private pipelineSubscribers = new Map<string, Set<Subscriber>>();
 
   subscribe(runId: string, fn: Subscriber): () => void {
     let set = this.subscribers.get(runId);
@@ -33,8 +39,37 @@ class RunEventBus {
     };
   }
 
+  /** 파이프라인 스코프 구독(채팅 독, M3). run 유무 무관 상시. */
+  subscribePipeline(pipelineId: string, fn: Subscriber): () => void {
+    let set = this.pipelineSubscribers.get(pipelineId);
+    if (!set) {
+      set = new Set();
+      this.pipelineSubscribers.set(pipelineId, set);
+    }
+    set.add(fn);
+    return () => {
+      const s = this.pipelineSubscribers.get(pipelineId);
+      if (!s) return;
+      s.delete(fn);
+      if (s.size === 0) this.pipelineSubscribers.delete(pipelineId);
+    };
+  }
+
   private emit(runId: string, event: SseEvent): void {
     const set = this.subscribers.get(runId);
+    if (!set) return;
+    for (const fn of set) {
+      try {
+        fn(event);
+      } catch {
+        // 개별 구독자 오류는 발행을 막지 않는다.
+      }
+    }
+  }
+
+  /** 파이프라인 채널 발행(M3). 구독자 오류는 격리. */
+  emitToPipeline(pipelineId: string, event: SseEvent): void {
+    const set = this.pipelineSubscribers.get(pipelineId);
     if (!set) return;
     for (const fn of set) {
       try {
@@ -60,7 +95,9 @@ class RunEventBus {
   /**
    * chat_card 발행(A5) — DB(appendChatMessage)에 먼저 쓰고 SSE 통지.
    * 진실은 DB. run 구독으로 relay(카드는 runId를 담아 events 라우트가 relay).
-   * @param runId SSE 라우팅 키(발행 대상 run). null이면 통지 생략(DB만).
+   * M3: 카드를 파이프라인 채널로도 **미러** 발행 → ChatDock의 단일 pipeline
+   * 구독에 run 이벤트와 챗봇 이벤트가 한 스트림으로 도달(engine.md §3).
+   * @param runId SSE 라우팅 키(발행 대상 run). null이면 run 채널 통지 생략(DB·미러만).
    */
   emitChatCard(
     pipelineId: string,
@@ -71,14 +108,38 @@ class RunEventBus {
   ): ChatMessage {
     // DB 먼저(진실의 원천).
     const message = appendChatMessage(pipelineId, kind, payload, runId, nodeRunId);
-    // SSE 통지(구독 중인 run으로 relay).
-    if (runId) this.emit(runId, { type: "chat_card", message });
+    const event: SseEvent = { type: "chat_card", message };
+    // run 스코프 통지(캔버스 사이드 등 run 구독).
+    if (runId) this.emit(runId, event);
+    // pipeline 채널 미러(채팅 독).
+    this.emitToPipeline(pipelineId, event);
     return message;
+  }
+
+  /**
+   * 챗봇 응답 스트리밍 델타(M3, 통지 전용). DB엔 완료 시 assistant 1건만 확정되므로
+   * 여기서는 파이프라인 채널로만 흘린다(진행 중 델타 유실 허용 — 결정 B).
+   */
+  emitChatDelta(pipelineId: string, ev: { messageId: string; chunk: string }): void {
+    this.emitToPipeline(pipelineId, { type: "chat_delta", ...ev });
+  }
+
+  /**
+   * 확정된 chat_message(user/assistant/card_block) 통지(M3). DB 저장은 호출자 몫
+   * (appendChatMessage) — 여기서는 파이프라인 채널로 통지만 한다.
+   */
+  emitChatMessage(pipelineId: string, message: ChatMessage): void {
+    this.emitToPipeline(pipelineId, { type: "chat_message", message });
   }
 
   /** 구독자 존재 여부(디버그·테스트용). */
   hasSubscribers(runId: string): boolean {
     return (this.subscribers.get(runId)?.size ?? 0) > 0;
+  }
+
+  /** 파이프라인 구독자 존재 여부(디버그·테스트용). */
+  hasPipelineSubscribers(pipelineId: string): boolean {
+    return (this.pipelineSubscribers.get(pipelineId)?.size ?? 0) > 0;
   }
 }
 

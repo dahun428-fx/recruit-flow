@@ -341,14 +341,36 @@ export interface ArtifactDeltaEvent {
   chunk: string;
 }
 
-/** M2: run 보고·Human 대기 카드 통지. */
+/** M2: run 보고·Human 대기 카드 통지. run 스코프 + M3 pipeline 채널 미러. */
 export interface ChatCardEvent {
   type: "chat_card";
   message: ChatMessage;
 }
 
+/** M3: 챗봇 응답 스트리밍 델타(통지 전용 — DB엔 완료 시 assistant 1건만). */
+export interface ChatDeltaEvent {
+  type: "chat_delta";
+  messageId: string;
+  chunk: string;
+}
+
+/** M3: 확정된 chat_message(user/assistant/card_block) 통지. */
+export interface ChatMessageEvent {
+  type: "chat_message";
+  message: ChatMessage;
+}
+
+/**
+ * card_block payload 형태(런타임 타입 아님, 문서용):
+ *   { blockDefId: string; type: NodeType; name: string; description: string }
+ * gap 카드(card_human) payload: { event: 'gap_question'; nodeName; question }
+ *   / { event: 'waiting'; instruction; excerpt } / { event: 'approved' }
+ */
+
 export type SseEvent =
   | RunStatusEvent
   | NodeStatusEvent
   | ArtifactDeltaEvent
-  | ChatCardEvent;
+  | ChatCardEvent
+  | ChatDeltaEvent
+  | ChatMessageEvent;
