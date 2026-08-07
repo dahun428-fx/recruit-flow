@@ -245,3 +245,119 @@
   0% { transform: scale(1.03); }
   100% { transform: scale(1); }
 }
+
+/* ── U5: 컨텍스트 메뉴 (Notion 식) ── */
+.contextMenu {
+  position: fixed;
+  min-width: 180px;
+  background: var(--surface);
+  border: 1px solid #cfd5de;
+  border-radius: 9px;
+  box-shadow: 0 8px 28px rgba(15, 22, 40, 0.18);
+  padding: 5px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.menuItem {
+  all: unset;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 11px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.1s;
+  text-align: left;
+}
+.menuItem:hover {
+  background: #f2f4f8;
+}
+
+.menuItemDisabled {
+  opacity: 0.38;
+  cursor: default;
+  pointer-events: none;
+}
+
+.menuItemDanger {
+  color: #d1372e;
+}
+.menuItemDanger:hover {
+  background: #fde8e8;
+  color: #b02920;
+}
+
+.menuDivider {
+  height: 1px;
+  background: var(--border);
+  margin: 3px 0;
+}
+
+/* ── U5: 인라인 이름 변경 input ── */
+.renameInput {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: 2px solid var(--c-agent);
+  border-radius: 4px;
+  background: #fff;
+  font-size: 12.5px;
+  font-family: inherit;
+  padding: 1px 5px;
+  color: var(--text);
+}
+
+/* ── U5: 확인 팝업 ── */
+.confirmPopup {
+  position: fixed;
+  min-width: 210px;
+  background: var(--surface);
+  border: 1px solid #cfd5de;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(15, 22, 40, 0.18);
+  padding: 13px;
+  z-index: 60;
+}
+
+.confirmMsg {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+
+.confirmActions {
+  display: flex;
+  gap: 7px;
+  justify-content: flex-end;
+}
+
+.confirmBtn {
+  all: unset;
+  padding: 5px 13px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  transition: background 0.1s;
+}
+.confirmBtn:hover {
+  background: #f2f4f8;
+}
+
+.confirmBtnDanger {
+  background: #d1372e;
+  color: #fff;
+  border-color: #b02920;
+}
+.confirmBtnDanger:hover {
+  background: #b02920;
+}

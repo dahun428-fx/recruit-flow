@@ -171,6 +171,7 @@ export function TopBar() {
             }
             setHistoryOpen((v) => !v);
           }}
+          data-testid="run-history"
           data-tip="과거 run을 선택하면 캔버스가 그 run의 스냅샷을 읽기 전용으로 보여줍니다. '현재로 돌아가기'로 편집 모드 복귀"
         >
           <span>🕘</span>
@@ -195,6 +196,7 @@ export function TopBar() {
                 key={r.id}
                 className={`${styles.menuItem} ${r.id === snapshotRunId ? styles.current : ""}`}
                 onClick={() => selectHistoryRun(r)}
+                data-testid="run-history-item"
               >
                 {runLabel(r)}
               </button>
@@ -228,6 +230,7 @@ export function TopBar() {
             className={`${styles.runBtn} ${styles.running}`}
             onClick={run.cancel}
             disabled={run.busy}
+            data-testid="stop-btn"
             data-tip="실행 중단. 현재 노드의 SDK 호출을 취소하고 지금까지의 아티팩트는 보존됩니다"
           >
             ■ 중단
@@ -242,6 +245,7 @@ export function TopBar() {
             className={`${styles.runBtn} ${styles.idle}`}
             onClick={run.start}
             disabled={!run.canRun || run.busy}
+            data-testid="run-btn"
             data-tip="그래프를 검증하고 run을 시작합니다(스냅샷 생성). 고아 노드·사이클·Output 문제가 있으면 경고합니다"
           >
             ▶ 실행

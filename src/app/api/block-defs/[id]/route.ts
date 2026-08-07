@@ -1,10 +1,11 @@
-// PATCH  /api/block-defs/[id]  { tray?, enabled? } → BlockDef
-// DELETE /api/block-defs/[id]                      → { ok }
+// PATCH  /api/block-defs/[id]  { tray?, enabled?, name? } → BlockDef
+// DELETE /api/block-defs/[id]                             → { ok }
 import { NextResponse } from "next/server";
 import {
   deleteBlockDef,
   getBlockDef,
   setBlockDefEnabled,
+  setBlockDefName,
   setBlockDefTray,
 } from "@/lib/db/queries";
 
@@ -19,14 +20,27 @@ export async function PATCH(
   const body = (await req.json().catch(() => ({}))) as {
     tray?: boolean;
     enabled?: boolean;
+    name?: string;
   };
 
-  // tray와 enabled를 각각 또는 동시에 처리.
   const hasTray = typeof body.tray === "boolean";
   const hasEnabled = typeof body.enabled === "boolean";
+  const hasName = typeof body.name === "string";
 
-  if (!hasTray && !hasEnabled) {
-    return NextResponse.json({ error: "tray 또는 enabled 필드가 필요합니다." }, { status: 400 });
+  if (!hasTray && !hasEnabled && !hasName) {
+    return NextResponse.json(
+      { error: "tray, enabled, name 중 하나 이상의 필드가 필요합니다." },
+      { status: 400 },
+    );
+  }
+
+  // name 검증: trim 후 빈 문자열이면 400.
+  if (hasName) {
+    const trimmed = (body.name as string).trim();
+    if (trimmed === "") {
+      return NextResponse.json({ error: "이름은 빈 문자열일 수 없습니다." }, { status: 400 });
+    }
+    setBlockDefName(id, trimmed);
   }
 
   // tray 먼저 적용(트레이 승인 = tray:false).

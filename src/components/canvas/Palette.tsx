@@ -3,6 +3,7 @@
 // 항목별 활성/비활성 토글(hover 시 노출, 비활성 시 상시).
 // U3: 새 블록 트레이 구획 — tray===true 항목, 드래그/더블클릭 승인(tray:false) + X 거절(DELETE).
 // U4: rf:trayHighlight 이벤트 수신 시 해당 항목 하이라이트.
+// U5: 항목 우클릭 = Notion 식 컨텍스트 메뉴 (스펙 §5).
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -70,6 +71,27 @@ interface PaletteItem {
   enabled: boolean;
 }
 
+/** 컨텍스트 메뉴 섹션 구분. */
+type ContextSection = "empty" | "library" | "tray";
+
+/** 컨텍스트 메뉴 state. */
+interface ContextMenu {
+  section: ContextSection;
+  x: number;
+  y: number;
+  item?: PaletteItem;   // empty/library 항목
+  trayDef?: BlockDef;   // tray 항목
+  enabled?: boolean;    // 현재 활성 상태 (library/empty)
+}
+
+/** 확인 팝업 state. */
+interface Confirm {
+  message: string;
+  onConfirm: () => void;
+  x: number;
+  y: number;
+}
+
 interface Props {
   /** 더블클릭 추가 — 노드 타입으로 캔버스 빈자리에 배치. */
   onAddBlock: (type: NodeType, blockDef?: BlockDef) => void;
@@ -94,7 +116,17 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
   const [enabledMap, setEnabledMap] = useState<Record<string, boolean>>({});
   // U4: 트레이 항목 하이라이트
   const [highlightTrayId, setHighlightTrayId] = useState<string | null>(null);
+  // U5: 컨텍스트 메뉴
+  const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
+  // U5: 확인 팝업
+  const [confirm, setConfirm] = useState<Confirm | null>(null);
+  // U5: 인라인 이름 변경 state (blockDef id → 편집 중 이름)
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+
   const paletteRef = useRef<HTMLDivElement>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
   // block_defs 로드(all=1 — tray 포함)
   const loadBlockDefs = useCallback(() => {
@@ -126,8 +158,20 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
     return () => window.removeEventListener("rf:trayHighlight", onTrayHighlight);
   }, []);
 
+  // 바깥 클릭 — 팝오버·컨텍스트 메뉴 닫기
   useEffect(() => {
     function onDown(e: MouseEvent) {
+      // 컨텍스트 메뉴 닫기
+      if (
+        contextMenu &&
+        contextMenuRef.current &&
+        !contextMenuRef.current.contains(e.target as Node)
+      ) {
+        setContextMenu(null);
+        setConfirm(null);
+        return;
+      }
+      // 팔레트 팝오버 닫기
       if (paletteRef.current && !paletteRef.current.contains(e.target as Node)) {
         setPopover(null);
         setSelected(null);
@@ -135,7 +179,31 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
     }
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, []);
+  }, [contextMenu]);
+
+  // Esc — 컨텍스트 메뉴·확인 팝업·이름 변경 닫기
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setContextMenu(null);
+        setConfirm(null);
+        if (renamingId) {
+          setRenamingId(null);
+          setRenameValue("");
+        }
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [renamingId]);
+
+  // 이름 변경 input에 포커스
+  useEffect(() => {
+    if (renamingId && renameInputRef.current) {
+      renameInputRef.current.focus();
+      renameInputRef.current.select();
+    }
+  }, [renamingId]);
 
   function toggle(cat: string) {
     setOpen((o) => ({ ...o, [cat]: !o[cat] }));
@@ -215,15 +283,152 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
     [onApproveTray],
   );
 
-  // U3: 트레이 항목 거절(DELETE)
-  const rejectTrayItem = useCallback(
-    (def: BlockDef, e: React.MouseEvent) => {
-      e.stopPropagation();
+  // U3: 트레이 항목 거절(DELETE) — 확인 팝업 포함
+  const rejectTrayItemConfirmed = useCallback(
+    (def: BlockDef) => {
       setBlockDefs((prev) => prev.filter((d) => d.id !== def.id));
       fetch(`/api/block-defs/${def.id}`, { method: "DELETE" }).catch(() => {});
     },
     [],
   );
+
+  // 기존 트레이 X 버튼 (확인 팝업 경유)
+  const onTrayXClick = useCallback(
+    (def: BlockDef, e: React.MouseEvent) => {
+      e.stopPropagation();
+      const target = e.currentTarget as HTMLElement;
+      const rect = target.getBoundingClientRect();
+      setConfirm({
+        message: `"${def.name}" 블록을 거절(폐기)할까요?`,
+        onConfirm: () => {
+          rejectTrayItemConfirmed(def);
+          setConfirm(null);
+        },
+        x: Math.min(rect.right + 8, window.innerWidth - 220),
+        y: Math.min(rect.top, window.innerHeight - 100),
+      });
+    },
+    [rejectTrayItemConfirmed],
+  );
+
+  // ─── U5: 컨텍스트 메뉴 열기 ───────────────────────────────────────
+
+  /** 뷰포트 경계를 고려해 메뉴 좌상단 좌표 보정. */
+  function clampMenuPos(rawX: number, rawY: number, w = 200, h = 160) {
+    return {
+      x: Math.min(rawX, window.innerWidth - w - 8),
+      y: Math.min(rawY, window.innerHeight - h - 8),
+    };
+  }
+
+  function openContextMenu(
+    e: React.MouseEvent,
+    section: ContextSection,
+    item?: PaletteItem,
+    trayDef?: BlockDef,
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    // 열려 있던 상세 팝오버 닫기
+    setPopover(null);
+    setSelected(null);
+    setConfirm(null);
+
+    const { x, y } = clampMenuPos(e.clientX, e.clientY);
+    const enabled =
+      item?.blockDef
+        ? (enabledMap[item.blockDef.id] ?? item.blockDef.enabled)
+        : item?.enabled;
+
+    setContextMenu({ section, x, y, item, trayDef, enabled });
+  }
+
+  // ─── U5: 메뉴 액션 ────────────────────────────────────────────────
+
+  /** 캔버스에 추가 (빈 블록·라이브러리 공통) */
+  function menuAddToCanvas(item: PaletteItem) {
+    if (!item.enabled) return;
+    onAddBlock(item.type, item.blockDef);
+    setContextMenu(null);
+  }
+
+  /** 활성/비활성 토글 (라이브러리 전용) */
+  function menuToggleEnabled(item: PaletteItem) {
+    if (!item.blockDef) return;
+    const newVal = !(enabledMap[item.blockDef.id] ?? item.blockDef.enabled);
+    setEnabledMap((m) => ({ ...m, [item.blockDef!.id]: newVal }));
+    fetch(`/api/block-defs/${item.blockDef.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: newVal }),
+    }).catch(() => {});
+    setContextMenu(null);
+  }
+
+  /** 이름 변경 시작 */
+  function menuStartRename(id: string, currentName: string) {
+    setRenamingId(id);
+    setRenameValue(currentName);
+    setContextMenu(null);
+  }
+
+  /** 이름 변경 저장 */
+  function commitRename(id: string) {
+    const trimmed = renameValue.trim();
+    if (trimmed) {
+      // 낙관적 갱신
+      setBlockDefs((prev) =>
+        prev.map((d) => (d.id === id ? { ...d, name: trimmed } : d)),
+      );
+      fetch(`/api/block-defs/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      }).catch(() => {});
+    }
+    setRenamingId(null);
+    setRenameValue("");
+  }
+
+  /** 삭제(라이브러리) — 확인 팝업 표시 */
+  function menuDeleteLibrary(item: PaletteItem) {
+    if (!item.blockDef) return;
+    const def = item.blockDef;
+    const { x, y } = contextMenu ?? { x: 200, y: 200 };
+    setContextMenu(null);
+    setConfirm({
+      message: `"${def.name}" 블록을 삭제할까요?`,
+      onConfirm: () => {
+        // 낙관적 갱신
+        setBlockDefs((prev) => prev.filter((d) => d.id !== def.id));
+        fetch(`/api/block-defs/${def.id}`, { method: "DELETE" }).catch(() => {});
+        setConfirm(null);
+      },
+      x: Math.min(x, window.innerWidth - 220),
+      y: Math.min(y, window.innerHeight - 100),
+    });
+  }
+
+  /** 승인하고 추가(트레이) — 드래그/더블클릭 승인과 동일 경로(노드 추가 1회). */
+  function menuApproveTray(def: BlockDef) {
+    approveTrayItem(def);
+    setContextMenu(null);
+  }
+
+  /** 거절(트레이) — 확인 팝업 표시 */
+  function menuRejectTray(def: BlockDef) {
+    const { x, y } = contextMenu ?? { x: 200, y: 200 };
+    setContextMenu(null);
+    setConfirm({
+      message: `"${def.name}" 블록을 거절(폐기)할까요?`,
+      onConfirm: () => {
+        rejectTrayItemConfirmed(def);
+        setConfirm(null);
+      },
+      x: Math.min(x, window.innerWidth - 220),
+      y: Math.min(y, window.innerHeight - 100),
+    });
+  }
 
   return (
     <div className={styles.palette} ref={paletteRef}>
@@ -259,18 +464,22 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
               <div className={styles.children}>
                 {items.map((item) => {
                   const isEnabled = item.enabled;
+                  const isLibrary = !!item.blockDef;
+                  const section: ContextSection = isLibrary ? "library" : "empty";
+                  const isRenaming = isLibrary && renamingId === item.blockDef?.id;
+
                   return (
                     <div
                       key={item.key}
                       className={`${styles.item} ${
                         selected === item.key ? styles.selected : ""
                       } ${!isEnabled ? styles.off : ""}`}
-                      draggable={isEnabled}
+                      data-testid={`palette-item-${item.key}`}
+                      draggable={isEnabled && !isRenaming}
                       onDragStart={
-                        isEnabled
+                        isEnabled && !isRenaming
                           ? (e) => {
                               e.dataTransfer.setData(DRAG_MIME, `${type}:${item.key}`);
-                              // blockDef 정보도 함께 전달
                               if (item.blockDef) {
                                 e.dataTransfer.setData(
                                   "application/x-rf-blockdef-id",
@@ -281,14 +490,21 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
                             }
                           : undefined
                       }
-                      onClick={(e) => onItemClick(e, item)}
+                      onClick={(e) => {
+                        if (isRenaming) return;
+                        onItemClick(e, item);
+                      }}
                       onDoubleClick={(e) => {
+                        if (isRenaming) return;
                         e.stopPropagation();
                         if (!isEnabled) return;
                         onAddBlock(type, item.blockDef);
                         setPopover(null);
                         setSelected(null);
                       }}
+                      onContextMenu={(e) =>
+                        openContextMenu(e, section, item)
+                      }
                       data-tip={item.tip}
                     >
                       <span
@@ -298,8 +514,27 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
                           borderRadius: isMountType ? 99 : 3,
                         }}
                       />
-                      <span className={styles.name}>{item.label}</span>
-                      {item.blockDef && (
+                      {isRenaming ? (
+                        <input
+                          ref={renameInputRef}
+                          className={styles.renameInput}
+                          value={renameValue}
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") commitRename(item.blockDef!.id);
+                            if (e.key === "Escape") {
+                              setRenamingId(null);
+                              setRenameValue("");
+                            }
+                            e.stopPropagation();
+                          }}
+                          onBlur={() => commitRename(item.blockDef!.id)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <span className={styles.name}>{item.label}</span>
+                      )}
+                      {item.blockDef && !isRenaming && (
                         <label
                           className={styles.miniSwitch}
                           onClick={toggleEnabled.bind(null, item)}
@@ -338,21 +573,32 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
             const isMountType = ["skill", "rule", "tool"].includes(def.type);
             const color = TYPE_COLOR[def.type] ?? "var(--c-agent)";
             const isHighlighted = highlightTrayId === def.id;
+            const isTrayRenaming = renamingId === def.id;
+
             return (
               <div
                 key={def.id}
                 className={`${styles.item} ${styles.trayItem} ${
                   isHighlighted ? styles.trayHighlight : ""
                 }`}
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.setData(TRAY_DRAG_MIME, def.id);
-                  e.dataTransfer.effectAllowed = "copy";
-                }}
+                data-testid={`tray-item-${def.id}`}
+                draggable={!isTrayRenaming}
+                onDragStart={
+                  !isTrayRenaming
+                    ? (e) => {
+                        e.dataTransfer.setData(TRAY_DRAG_MIME, def.id);
+                        e.dataTransfer.effectAllowed = "copy";
+                      }
+                    : undefined
+                }
                 onDoubleClick={(e) => {
+                  if (isTrayRenaming) return;
                   e.stopPropagation();
                   approveTrayItem(def);
                 }}
+                onContextMenu={(e) =>
+                  openContextMenu(e, "tray", undefined, def)
+                }
                 data-tip={`${def.description || def.name} · 드래그하거나 더블클릭하면 승인 후 캔버스에 추가됩니다. ✕는 거절(폐기)`}
               >
                 <span
@@ -362,20 +608,43 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
                     borderRadius: isMountType ? 99 : 3,
                   }}
                 />
-                <span className={styles.name}>{def.name}</span>
-                <span
-                  className={styles.trayReject}
-                  onClick={(e) => rejectTrayItem(def, e)}
-                  title="거절(폐기)"
-                >
-                  ✕
-                </span>
+                {isTrayRenaming ? (
+                  <input
+                    ref={renameInputRef}
+                    className={styles.renameInput}
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitRename(def.id);
+                      if (e.key === "Escape") {
+                        setRenamingId(null);
+                        setRenameValue("");
+                      }
+                      e.stopPropagation();
+                    }}
+                    onBlur={() => commitRename(def.id)}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <span className={styles.name}>{def.name}</span>
+                )}
+                {!isTrayRenaming && (
+                  <span
+                    className={styles.trayReject}
+                    onClick={(e) => onTrayXClick(def, e)}
+                    data-testid={`tray-reject-${def.id}`}
+                    title="거절(폐기)"
+                  >
+                    ✕
+                  </span>
+                )}
               </div>
             );
           })}
         </div>
       )}
 
+      {/* 상세 팝오버(클릭 시) */}
       {popover && (
         <div
           className={styles.popover}
@@ -396,6 +665,127 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
           <div className={styles.hint}>
             <b>더블클릭</b> 또는 <b>드래그</b>로 캔버스에 추가
             {popover.item.blockDef && " · 행의 토글로 활성/비활성"}
+          </div>
+        </div>
+      )}
+
+      {/* U5: 컨텍스트 메뉴 */}
+      {contextMenu && !confirm && (
+        <div
+          ref={contextMenuRef}
+          className={styles.contextMenu}
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {/* ── 빈 블록 메뉴 ── */}
+          {contextMenu.section === "empty" && contextMenu.item && (
+            <>
+              <button
+                className={styles.menuItem}
+                onClick={() => menuAddToCanvas(contextMenu.item!)}
+              >
+                캔버스에 추가
+              </button>
+            </>
+          )}
+
+          {/* ── 라이브러리 메뉴 ── */}
+          {contextMenu.section === "library" && contextMenu.item && (
+            <>
+              <button
+                className={`${styles.menuItem} ${
+                  !contextMenu.enabled ? styles.menuItemDisabled : ""
+                }`}
+                onClick={() => {
+                  if (!contextMenu.enabled) return;
+                  menuAddToCanvas(contextMenu.item!);
+                }}
+              >
+                캔버스에 추가
+              </button>
+              <div className={styles.menuDivider} />
+              <button
+                className={styles.menuItem}
+                onClick={() => menuToggleEnabled(contextMenu.item!)}
+              >
+                {contextMenu.enabled ? "비활성화" : "활성화"}
+              </button>
+              <button
+                className={styles.menuItem}
+                onClick={() =>
+                  menuStartRename(
+                    contextMenu.item!.blockDef!.id,
+                    contextMenu.item!.label,
+                  )
+                }
+              >
+                이름 변경
+              </button>
+              <div className={styles.menuDivider} />
+              <button
+                className={`${styles.menuItem} ${styles.menuItemDanger}`}
+                onClick={() => menuDeleteLibrary(contextMenu.item!)}
+              >
+                삭제
+              </button>
+            </>
+          )}
+
+          {/* ── 트레이 메뉴 ── */}
+          {contextMenu.section === "tray" && contextMenu.trayDef && (
+            <>
+              <button
+                className={styles.menuItem}
+                onClick={() => menuApproveTray(contextMenu.trayDef!)}
+                data-testid="tray-approve"
+              >
+                승인하고 추가
+              </button>
+              <div className={styles.menuDivider} />
+              <button
+                className={styles.menuItem}
+                onClick={() =>
+                  menuStartRename(
+                    contextMenu.trayDef!.id,
+                    contextMenu.trayDef!.name,
+                  )
+                }
+              >
+                이름 변경
+              </button>
+              <div className={styles.menuDivider} />
+              <button
+                className={`${styles.menuItem} ${styles.menuItemDanger}`}
+                onClick={() => menuRejectTray(contextMenu.trayDef!)}
+              >
+                거절(폐기)
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* U5: 확인 팝업 */}
+      {confirm && (
+        <div
+          className={styles.confirmPopup}
+          style={{ left: confirm.x, top: confirm.y }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <p className={styles.confirmMsg}>{confirm.message}</p>
+          <div className={styles.confirmActions}>
+            <button
+              className={`${styles.confirmBtn} ${styles.confirmBtnDanger}`}
+              onClick={confirm.onConfirm}
+            >
+              확인
+            </button>
+            <button
+              className={styles.confirmBtn}
+              onClick={() => setConfirm(null)}
+            >
+              취소
+            </button>
           </div>
         </div>
       )}

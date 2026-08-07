@@ -625,6 +625,12 @@ export function setBlockDefEnabled(id: string, enabled: boolean): BlockDef | nul
   return getBlockDef(id);
 }
 
+/** 블록 정의 이름 변경. 팔레트 인라인 편집에서 호출. */
+export function setBlockDefName(id: string, name: string): BlockDef | null {
+  db.update(blockDefs).set({ name }).where(eq(blockDefs.id, id)).run();
+  return getBlockDef(id);
+}
+
 /**
  * 트레이 승인(tray:false) 또는 트레이 대기(tray:true) 토글.
  * 챗봇이 add_block으로 트레이에 넣은 블록을 캔버스 드래그로 승인할 때 사용.

@@ -48,6 +48,7 @@ export function SidePanel({ onDownload }: Props) {
         <button
           className={tab === "art" ? styles.active : undefined}
           onClick={() => setTab("art")}
+          data-testid="artifact-tab"
         >
           아티팩트
         </button>
@@ -648,6 +649,7 @@ function Artifacts({
               key={nr.id}
               className={nr.iteration === selectedIteration ? styles.roundOn : undefined}
               onClick={() => setSelectedIteration(nr.iteration)}
+              data-testid={`iteration-chip-${nr.iteration}`}
               data-tip={`${nr.iteration}회차 아티팩트 보기`}
             >
               {nr.iteration}회차
@@ -679,6 +681,7 @@ function Artifacts({
             <button
               className={styles.dlBtn}
               onClick={() => onDownload(artifact.id)}
+              data-testid="download-html"
             >
               ⬇ HTML 다운로드
             </button>
@@ -714,6 +717,7 @@ function Artifacts({
               className={styles.approveBtn}
               onClick={handleApprove}
               disabled={approving || status !== "waiting_human"}
+              data-testid="human-approve"
               data-tip="이 노드의 아티팩트를 승인하고 파이프라인 실행을 재개합니다"
             >
               {approving ? "승인 중…" : "승인"}
