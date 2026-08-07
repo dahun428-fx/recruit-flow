@@ -121,8 +121,8 @@ ${tail}
 2. 관련 스펙 문서를 참조하라: specs/ui.md, specs/engine.md, specs/nodes.md, specs/m1-plan.md~m3-plan.md. 스크린샷·트레이스는 test-results/ 아래에 있다(경로만 참고).
 3. **수정 범위 제약(엄수)**: src/·e2e/ 만 수정한다. specs/·drizzle/·scripts/smoke-*·.git·playwright.config·e2e/support/(인프라)은 **변경 금지**.
 4. **테스트 기대값을 스펙과 다르게 완화하지 마라.** 앱이 스펙과 모순되면 수정하지 말고 그 사실을 응답에 보고하라.
-5. Node 22가 이미 PATH에 설정돼 있다 — \`npm run typecheck\`, \`npx playwright test <파일>\`을 그대로 실행하면 된다(별도 export 불필요).
-6. 수정 후 반드시 \`npm run typecheck\`로 그린을 확인하라.
+5. Node 22가 이미 PATH에 설정돼 있다 — \`npm run typecheck\`를 그대로 실행하면 된다(별도 export 불필요).
+6. 수정 후 \`npm run typecheck\`로만 그린을 확인하라. **playwright는 실행하지 마라** — 힐링 스크립트가 e2e로 재검증한다(중복·시간 낭비 방지). 빠르게 진단·수정에 집중하라.
 
 간결하게 수정하고, 무엇을 왜 고쳤는지 마지막에 요약하라.`;
 }
@@ -137,9 +137,9 @@ function callClaude(prompt: string): { ok: boolean; summary: string } {
       "--permission-mode",
       "acceptEdits",
       "--allowedTools",
-      "Read,Glob,Grep,Edit,Write,Bash(npm run typecheck:*),Bash(npx playwright test:*)",
+      "Read,Glob,Grep,Edit,Write,Bash(npm run typecheck:*)",
       "--max-turns",
-      "80",
+      "30",
     ],
     // 서브 에이전트 Bash에 Node 22를 PATH 앞에 주입 → npm이 곧 node22(export 불필요).
     {
@@ -202,10 +202,7 @@ function reverify(): boolean {
     console.log("  ✗ 재검증: smoke-chat 실패");
     return false;
   }
-  if (!runE2e().green) {
-    console.log("  ✗ 재검증: e2e 재실행 실패");
-    return false;
-  }
+  // e2e는 직전 루프에서 green 확인됨(중복 실행 생략). typecheck+smoke만 추가 게이트.
   return true;
 }
 
