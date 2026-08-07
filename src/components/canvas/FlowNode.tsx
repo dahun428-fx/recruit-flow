@@ -79,6 +79,7 @@ export function FlowNode({ data, selected, id: rfId }: NodeProps) {
   return (
     <div
       className={nodeClassName}
+      data-testid={`node-${d.nodeId ?? rfId}`}
       onClick={
         isHuman && d.status === "waiting_human" && d.onHumanClick
           ? (e) => {
@@ -121,7 +122,7 @@ export function FlowNode({ data, selected, id: rfId }: NodeProps) {
       <div className={styles.body}>
         <div className={styles.name}>{d.name}</div>
         <div className={styles.desc}>{d.desc}</div>
-        <div className={styles.status}>{STATUS_LABEL[d.status]}</div>
+        <div className={styles.status} data-testid="node-status">{STATUS_LABEL[d.status]}</div>
         {showDownload && (
           <button
             className={styles.dlBtn}
@@ -129,6 +130,7 @@ export function FlowNode({ data, selected, id: rfId }: NodeProps) {
               e.stopPropagation();
               d.onDownload?.(d.downloadArtifactId!);
             }}
+            data-testid="download-html"
             data-tip="완성된 이력서를 자기완결형 HTML 1파일로 다운로드"
           >
             ⬇ HTML

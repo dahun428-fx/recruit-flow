@@ -286,10 +286,12 @@ export function ChatDock({ scrollToNodeId, onScrollHandled }: Props) {
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={onKeyDown}
               disabled={sending || !pipelineId}
+              data-testid="chat-input"
             />
             <button
               onClick={() => void sendMessage()}
               disabled={sending || !inputText.trim() || !pipelineId}
+              data-testid="chat-send"
             >
               {sending ? "전송 중…" : "전송"}
             </button>
@@ -340,7 +342,7 @@ function UserCard({
 }) {
   const p = msg.payload as UserPayload;
   return (
-    <div ref={cardRef} className={`${styles.card} ${styles.user}`}>
+    <div ref={cardRef} className={`${styles.card} ${styles.user}`} data-testid={`chat-msg-${msg.id}`} data-kind="user">
       <div className={styles.text}>{p.text}</div>
     </div>
   );
@@ -359,7 +361,7 @@ function AssistantCard({
 }) {
   const p = msg.payload as AssistantPayload;
   return (
-    <div ref={cardRef} className={`${styles.card} ${styles.assistant}`}>
+    <div ref={cardRef} className={`${styles.card} ${styles.assistant}`} data-testid={`chat-msg-${msg.id}`} data-kind="assistant">
       <div className={styles.kind}>챗봇</div>
       <div className={styles.text}>{p.text}</div>
     </div>
@@ -410,7 +412,7 @@ function RunCard({
   }
 
   return (
-    <div ref={cardRef} className={cardClass}>
+    <div ref={cardRef} className={cardClass} data-testid={`chat-msg-${msg.id}`} data-kind="card_run">
       <div className={styles.kind}>{title}</div>
       {body && <div>{body}</div>}
       {isEnd && payload.htmlArtifactId && (
@@ -494,7 +496,7 @@ function HumanCard({
   // approved 이벤트 — 이미 승인됨 표시
   if (event === "approved") {
     return (
-      <div ref={cardRef} className={`${styles.card} ${styles.human}`}>
+      <div ref={cardRef} className={`${styles.card} ${styles.human}`} data-testid={`chat-msg-${msg.id}`} data-kind="card_human">
         <div className={styles.kind}>사람 대기 — {payload.nodeName ?? "Human 노드"}</div>
         <div className={styles.approvedBadge}>승인 완료</div>
       </div>
@@ -504,7 +506,7 @@ function HumanCard({
   // gap_question — 인라인 답변 입력창
   if (event === "gap_question") {
     return (
-      <div ref={cardRef} className={`${styles.card} ${styles.human}`}>
+      <div ref={cardRef} className={`${styles.card} ${styles.human}`} data-testid={`chat-msg-${msg.id}`} data-kind="card_human">
         <div className={styles.kind}>갭 인터뷰 — {payload.nodeName ?? "Agent"}</div>
         {payload.question && (
           <div className={styles.instruction}>{payload.question}</div>
@@ -520,12 +522,14 @@ function HumanCard({
               onChange={(e) => setAnswerText(e.target.value)}
               rows={3}
               disabled={answering}
+              data-testid="gap-answer-input"
             />
             <div className={styles.actions}>
               <button
                 className={styles.primary}
                 onClick={() => void submitAnswer()}
                 disabled={answering || !answerText.trim()}
+                data-testid="gap-answer-submit"
               >
                 {answering ? "전송 중…" : "답변"}
               </button>
@@ -539,7 +543,7 @@ function HumanCard({
   // waiting (기본) — 승인·편집
   const allowEdit = payload.allowEdit ?? false;
   return (
-    <div ref={cardRef} className={`${styles.card} ${styles.human}`}>
+    <div ref={cardRef} className={`${styles.card} ${styles.human}`} data-testid={`chat-msg-${msg.id}`} data-kind="card_human">
       <div className={styles.kind}>사람 대기 — {payload.nodeName ?? "Human 노드"}</div>
       {payload.instruction && (
         <div className={styles.instruction}>{payload.instruction}</div>
@@ -571,6 +575,7 @@ function HumanCard({
               className={styles.primary}
               onClick={() => void approve(editing ? editContent : undefined)}
               disabled={approving}
+              data-testid="human-card-approve"
             >
               {approving ? "승인 중…" : "승인"}
             </button>
@@ -604,7 +609,7 @@ function BlockCard({
   }, [payload.blockDefId]);
 
   return (
-    <div ref={cardRef} className={`${styles.card} ${styles.block}`}>
+    <div ref={cardRef} className={`${styles.card} ${styles.block}`} data-testid={`chat-msg-${msg.id}`} data-kind="card_block">
       <div className={styles.kind}>블록 생성 — 새 블록 트레이에 담김</div>
       <div className={styles.blockName}>
         <span className={styles.blockType}>{payload.type?.toUpperCase()}</span>

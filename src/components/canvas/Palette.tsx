@@ -409,10 +409,9 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
     });
   }
 
-  /** 승인하고 추가(트레이) */
+  /** 승인하고 추가(트레이) — 드래그/더블클릭 승인과 동일 경로(노드 추가 1회). */
   function menuApproveTray(def: BlockDef) {
     approveTrayItem(def);
-    onAddBlock(def.type, { ...def, tray: false });
     setContextMenu(null);
   }
 
@@ -475,6 +474,7 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
                       className={`${styles.item} ${
                         selected === item.key ? styles.selected : ""
                       } ${!isEnabled ? styles.off : ""}`}
+                      data-testid={`palette-item-${item.key}`}
                       draggable={isEnabled && !isRenaming}
                       onDragStart={
                         isEnabled && !isRenaming
@@ -581,6 +581,7 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
                 className={`${styles.item} ${styles.trayItem} ${
                   isHighlighted ? styles.trayHighlight : ""
                 }`}
+                data-testid={`tray-item-${def.id}`}
                 draggable={!isTrayRenaming}
                 onDragStart={
                   !isTrayRenaming
@@ -631,6 +632,7 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
                   <span
                     className={styles.trayReject}
                     onClick={(e) => onTrayXClick(def, e)}
+                    data-testid={`tray-reject-${def.id}`}
                     title="거절(폐기)"
                   >
                     ✕
@@ -735,6 +737,7 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
               <button
                 className={styles.menuItem}
                 onClick={() => menuApproveTray(contextMenu.trayDef!)}
+                data-testid="tray-approve"
               >
                 승인하고 추가
               </button>
