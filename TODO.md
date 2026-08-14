@@ -5,7 +5,7 @@
 ## 현재 상태
 
 - 검증 기준선(macOS, Node 22.22.2 + npm 11): `typecheck` GREEN ·
-  e2e **18/18** · 엔진 스모크 **82/82** · 챗봇 스모크 **38/38**.
+  e2e **29/29(retries=0)** · 엔진 스모크 **82/82** · 챗봇 스모크 **38/38**.
 - P1·P2·P3 전 항목 처리 완료. 아래 "처리 내역" 참조.
 
 > **주의 — 이 초록이 보증하는 범위는 좁다.**
@@ -90,18 +90,124 @@
 - [ ] 부분 재실행 시 재사용 출처 선택 UI (`specs/ui.md:253`).
 - [ ] portfolio/headhunter 에이전트군의 앱 내 정식 이관·활성화 범위 결정.
 
-## 다음 할 일 — 검증 부채 청산
+## 다음 할 일 — 완성 판정을 위한 실행 TODO
 
-상세 계획: **[specs/completion-plan.md](specs/completion-plan.md)**
+상세 근거: **[specs/completion-plan.md](specs/completion-plan.md)**
 
-- [ ] **A. 실 LLM 검증** (최우선 — 블루프린트 M2 완료 기준 그 자체)
-  - [ ] A1. 임포터 실행해 실 DB 생성 (`--source ~/Documents/workspaces9/my-recruit`)
-  - [ ] A2. `@live` 카나리아 2건 (`npm run e2e:live` — 구독 쿼터 소비)
-  - [ ] A3. canonical 파이프라인 실 조립·실행 → 이력서 HTML 산출
-- [ ] **B. 미증명 5건에 대조군 검증된 테스트 추가**
-  - [ ] B1. `PUT /graph` 400 (커버리지 0) — [ ] B2. Human 승인 버튼 UI (커버리지 0)
-  - [ ] B3. 트레이 브로드캐스트 — [ ] B4. SSE 끊김 복원 — [ ] B5. h3 위계 시각 확인
-- [ ] **C. 테스트 우회 패턴 감사** (`reload()`·`.first()`·API 폴링 전용 단언)
+아래 항목은 단순히 테스트가 초록인 것으로 끝내지 않는다. 회귀 테스트는
+가능하면 **수정 전 구현에서 실패하는 대조군**을 확인하고, 각 체크박스는
+산출물·검증 결과가 함께 남았을 때만 닫는다.
+
+### D — 먼저 닫아야 할 현재 정확성 결함
+
+- [x] **D1. SSE 스냅샷/버퍼 병합을 실제로 멱등하게 만든다.**
+  - 범위: `useRunStream`·`usePipelineStream`과 필요한 SSE 타입/서버 이벤트.
+  - 현재 위험: delta가 DB 스냅샷에 이미 포함됐는데 버퍼에서 다시 append되면
+    아티팩트 내용이 중복되고, 오래된 상태 이벤트가 최신 스냅샷을 되돌릴 수 있다.
+  - 완료 조건: 이벤트 id/offset 기반 병합 또는 동등하게 증명 가능한 프로토콜로
+    중복 delta와 상태 역행이 모두 불가능해야 한다.
+  - 검증: 스냅샷 응답 직전 delta를 의도적으로 발생시키는 회귀 테스트가 수정
+    전에는 실패하고 수정 후 통과한다.
+  - 담당: `sse_recovery` 서브에이전트. 의존성: 없음.
+
+- [x] **D2. SSE 강제 단절 후 REST 복원·재구독을 자동 검증한다(B4).**
+  - 완료 조건: events 요청을 abort/offline 처리한 뒤 UI가 DB 스냅샷으로 복원되고,
+    이후 새 이벤트까지 새로고침 없이 수신한다.
+  - 검증: Playwright 집중 실행 + D1 경계 테스트.
+  - 담당: `sse_recovery`. 의존성: D1.
+
+### B — 구현됐지만 아직 증명되지 않은 수직 회귀 테스트
+
+- [x] **B1. Graph PUT 구조 검증 E2E를 추가한다.**
+  - 케이스: `positionX`/`config`/`name` 누락, 중복 node id, dangling edge는
+    각각 400이며 정상 그래프는 200이어야 한다.
+  - 대조군: `validateGraphPayload` 호출 제거 시 적어도 결함 케이스가 실패해야 한다.
+  - 파일 후보: graph route·`validation.ts`·신규 E2E API 스펙.
+  - 담당: `verification_slices`. 의존성: 없음.
+
+- [x] **B2. artifact 없는 Human을 실제 UI 버튼으로 승인한다.**
+  - 완료 조건: Human 노드 선택 → `human-approve` 클릭 → 하류 Output 성공을
+    API 승인이나 `page.reload()` 없이 UI에서 확인한다.
+  - 대조군: 승인 컨트롤을 artifact 조건 안으로 되돌리면 실패해야 한다.
+  - 담당: `verification_slices`. 의존성: 없음.
+
+- [x] **B3. `block_def` 크로스탭 브로드캐스트를 검증한다.**
+  - 완료 조건: 두 탭/컨텍스트 중 한쪽에서 승인·거절했을 때 다른 쪽 Palette가
+    새로고침 없이 추가/제거를 반영한다.
+  - 대조군: `emitBlockDef` 호출 제거 시 실패해야 한다.
+  - 담당: `verification_slices`. 의존성: 없음.
+
+- [x] **B5. Output 제목 위계를 렌더 산출물로 확인한다.**
+  - 완료 조건: h1 > h2(14.5pt) > h3(12.5pt) > body(10.2pt)가 실제 HTML/CSS
+    산출물에서 확인되고, 가능하면 스냅샷 또는 브라우저 computed-style 단언으로 남는다.
+  - `topicTitle`은 h3와 분리할지 함께 결정하고 회귀 테스트로 고정한다.
+  - 담당: `quality_audit`. 의존성: 없음(A3에서 육안 재확인).
+
+### C — 품질 게이트와 테스트 신뢰성
+
+- [x] **C0. lint 명령을 현재 Next/ESLint 조합에 맞게 복구한다.**
+  - 완료 조건: `npm run lint`가 실제 `src`·`e2e`·`scripts`를 검사하고 exit 0.
+  - 검증: lint + typecheck + build.
+  - 담당: `quality_audit`. 의존성: 없음.
+
+- [x] **C1. E2E 우회 패턴을 전수 감사한다.**
+  - 대상: `page.reload()`·`.first()`·과대한 timeout·API 폴링만 있는 단언.
+  - 완료 조건: 각 사용처를 정당/은폐 위험으로 분류하고, 위험한 사용처는 UI
+    단언 또는 유일한 testid로 교체하며 결과를 `specs/e2e.md`에 남긴다.
+  - 담당: `quality_audit`. 의존성: B1~B3 결과와 충돌 없이 병합.
+
+- [x] **C2. 스모크 단언의 공허한 통과를 감사한다.**
+  - 대상: 빈 배열에서도 참이 되는 `every`/`!some`, 대상 개수 선행 단언 없는 검사.
+  - 완료 조건: 각 대상 집합에 존재성/개수 단언을 먼저 두고 82/82·38/38을 유지한다.
+  - 담당: `quality_audit`. 의존성: 없음.
+
+### 로컬 자동 검증 체크포인트
+
+- [x] D·B·C 변경을 합친 뒤 `npm run lint`와 `npm run typecheck`가 통과한다.
+- [x] `npm run build`가 통과한다.
+- [x] 결정론 E2E 전체가 통과하고 새 회귀 케이스 수가 결과에 반영된다.
+- [x] 엔진·챗봇 스모크가 각각 82/82·38/38 이상으로 통과한다.
+- [x] 대조군 확인 결과와 테스트 감사 결과를 `specs/e2e.md`에 기록한다.
+
+### A — 실제 LLM 완전 이관 검증 (외부 비용·인증 승인 게이트)
+
+- [x] **A1. 실제 소스를 임포트해 검증용 DB를 만든다.**
+  - 명령: `npx tsx scripts/import-my-recruit.ts --source
+    ~/Documents/workspaces9/my-recruit --db data/recruit-flow.db`.
+  - 완료 조건: block_defs 약 19건, documents와 document_versions의 실제 본문,
+    재실행 idempotency를 수량으로 확인한다.
+  - 주의: 개인 데이터가 들어가는 로컬 DB 생성이므로 실행 직전 대상 경로를 확인한다.
+  - [x] 사전 점검: agents 19개, resume-reference 문서 17개, 빈 파일·중복 name 0.
+  - [x] `--db`가 정적 import보다 늦게 적용되던 초기화 순서 결함 수정.
+  - [x] 실제 import와 2회 재실행: 19/17/17 수량·본문·v1·idempotency 확인.
+
+- [x] **A2. 사용자 승인 후 `@live` 카나리아 3건을 실행한다.**
+  - 사전 조건: Claude 인증 경로 확인, 구독 쿼터 소비 승인.
+  - 완료 조건: 실 챗봇 add_block과 Input→Agent→Output canonical run 통과.
+  - 실패 시 로그에서 SDK/인증/도구/스트리밍 실패를 구분해 회귀 항목으로 환류한다.
+  - [x] 사전 점검: 3개 live 테스트 발견, 포트/DB 격리와 Claude CLI 인증 확인.
+  - [x] 구독 쿼터 승인 후 실제 실행: 3/3, retries=0, 1.4분.
+
+- [ ] **A3. 실제 블록으로 canonical 파이프라인을 조립·실행한다.**
+  - 흐름: 작성 → 비평 → 점수 Gate 반복 → Output 렌더 → HTML 다운로드.
+  - 완료 조건: 실제 JD 기반 이력서 HTML 산출, Gate 반복과 Human 경로 확인,
+    다운로드 파일 및 B5 제목 위계 육안 검증.
+  - 산출물·환경·실행 결과를 `specs/e2e.md`에 기록한다.
+  - 의존성: A1, A2, 로컬 자동 검증 체크포인트.
+  - [x] imported writer/reviewer/recruiter-screen으로 실제 3회 Gate 루프 실행.
+  - [x] Human 편집 승인 → Output → download route → HTML/PNG 제목 위계 확인.
+  - [x] 두산로보틱스 Fullstack 실제 JD로 67→79점 개선 및 rate-limit 복구 실증.
+  - [ ] 실제 JD Gate pass: 최종 재시도 75/80. 근거 문서의 측정 스코프·전후
+    수치 쌍이 없어 MUST blocker 2건이 남음(근거를 발명하지 않고 미완료 유지).
+
+### 최종 완료 판정
+
+- [x] D1~D2, B1~B5, C0~C2가 모두 닫혔다.
+- [ ] A1~A3가 승인된 실제 환경에서 완료됐다.
+- [x] lint·typecheck·build·E2E·스모크가 모두 초록이고 작업 트리가 의도한
+  변경만 포함한다.
+- [x] `specs/completion-plan.md`와 `specs/e2e.md`가 현재 자동 검증 증거를 반영한다.
+- [ ] 위 조건을 만족한 뒤에만 프로젝트 상태를 “완성”으로 변경한다.
 
 ## 남은 관찰 사항 (비블로킹)
 

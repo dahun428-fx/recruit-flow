@@ -40,7 +40,7 @@ AI가 자동 수정하는 힐링 루프. 스모크(엔진 73·챗 38)가 못 덮
 - ★ e2e는 **다른 next dev가 떠 있으면 실패**(`.next/dev` 락은 프로젝트당 1개).
   실행 전 수동 dev 서버를 종료할 것.
 
-## 테스트 맵 (17 케이스, 스펙 출처)
+## 테스트 맵 (29 케이스, 스펙 출처)
 
 m1-basic-flow(M1 완료기준: 문서→실행→상태·스트리밍→다운로드→복원→중단) ·
 m1-canvas-edit · m2-gate-loop(fail→재작성→회차칩→pass / gate_failed) ·
@@ -98,5 +98,44 @@ enabled") → `claude -p`가 원인 진단·`disabled={!run.canRun || run.busy}`
 검증 규율: 회귀 테스트는 **고치기 전 코드에서 실패하는 것을 확인**한 뒤
 채택한다(대조군 실행). 통과만으로는 아무것도 증명하지 못한다.
 
-(참고: `download-html` testid가 FlowNode·SidePanel 양쪽에 있어 `.first()`
-사용 스펙은 한쪽만 고장나도 통과 — testid 유일화가 이상적.)
+## 검증 부채 자동화 보강 (2026-08-14)
+
+- `e2e/completion-verification.spec.ts` 8건: Graph PUT 오류 5종과 정상 저장,
+  artifact 없는 Human의 실제 UI 승인, 서로 다른 pipeline 탭의 트레이 승인·거절
+  브로드캐스트를 검증한다. 이 과정에서 `card_human` payload의 `nodeId` 누락도
+  발견해 수정했다.
+- `e2e/sse-recovery.spec.ts` 2건: SSE open 이후 snapshot 경계에서 cursor/offset
+  병합이 중복·상태 역행을 막는지, CDP 강제 offline 뒤 REST 복원·재구독으로
+  승인 이후 이벤트를 다시 받는지 검증한다.
+- `e2e/output-heading-visual.spec.ts` 1건: 실제 HTML 렌더의 computed style로
+  `h2 > h3` 위계를 확인하고 PNG를 테스트 첨부물로 남긴다.
+- `download-html` testid를 `download-html-node`/`download-html-panel`로 분리하고
+  `.first()` 우회를 제거했다. 문서 목록도 고유 testid로 지정해 strict locator의
+  간헐 충돌을 제거했다.
+- 스모크의 `every`/`!some` 단언은 대상 개수 또는 허용 상태를 먼저 확인하도록
+  보강했다. lint는 ESLint 9 flat config로 복구했다.
+
+통합 재검증: lint 0 errors(기존 warning 22) · typecheck GREEN · build GREEN ·
+결정론 E2E **29/29, retries=0** · 엔진 스모크 **82/82** · 챗봇 스모크 **38/38**.
+
+### 실제 데이터·LLM 실증 (2026-08-14)
+
+- `my-recruit`에서 agent 19개와 resume-reference 문서 17개를
+  `data/recruit-flow.db`에 임포트했다. block_defs 19 · documents 17 ·
+  document_versions 17 · 비어 있지 않은 본문 17 · current_version 모두 1이며,
+  두 차례 재실행 후 수량 불변(block 갱신 19/document 스킵 17)을 확인했다.
+- `npm run e2e:live -- --retries=0`: 실제 Claude 인증으로 live 카나리아
+  **3/3 통과(1.4분)** — add_block, Input→Agent→Output, 엣지 삭제 요청 거절.
+- 실제 imported agent canonical 실행:
+  - 일반 목표 run `CO6tVC3v_d8_WQ0sduzBF`: recruiter 70→75→72,
+    maxLoops=3 후 `gate_failed`; Gate decision 3건 모두 DB에 `fail`로 보존.
+  - 최종 writer Markdown을 Human이 편집 승인한 run
+    `3UQemOX1xIn5KPb9fptsI`은 succeeded. Output HTML 30,469B를 download route로
+    내려받았고 h1/h2/h3 `28/19.3333/16.6667px`, PNG 육안 레이아웃을 확인했다.
+  - 두산로보틱스 Fullstack 실제 JD run은 67→79로 개선 후 외부 rate limit을
+    만났으며, cooldown 뒤 보존 결과 기반 최종 재시도 `2cKz81Quuy1tW4_XKs8sH`
+    는 SDK 오류 없이 75/80으로 `gate_failed`였다.
+  - 남은 차단 사유는 측정 스코프 없는 `AI 응답 평균 2초대`와 전후 수치 쌍이
+    없는 `약 50% 개선`. 근거를 발명하지 않기 위해 A3 Gate pass는 미완료다.
+  - 재현 하네스: `scripts/run-canonical-live.mts`,
+    `scripts/render-canonical-live.mts`; 산출물은 gitignored `tmp/canonical-live/`.

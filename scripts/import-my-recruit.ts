@@ -84,9 +84,14 @@ function ensureSchema(): void {
   }
 }
 
-ensureSchema();
-
-import { createBlockDef, createDocument, listBlockDefs, listDocuments } from "../src/lib/db/queries";
+// queries는 client.ts를 평가하면서 DB 커넥션을 즉시 연다. 반드시 위에서
+// RECRUIT_FLOW_DB_PATH를 설정하고 스키마를 적용한 뒤 동적으로 불러와야
+// --db 오버라이드가 실제 쿼리 커넥션에도 반영된다.
+type Queries = typeof import("../src/lib/db/queries");
+let createBlockDef: Queries["createBlockDef"];
+let createDocument: Queries["createDocument"];
+let listBlockDefs: Queries["listBlockDefs"];
+let listDocuments: Queries["listDocuments"];
 
 // ---------------------------------------------------------------------------
 // 상수: 에이전트별 outputFormat 하드코딩 매핑
@@ -299,14 +304,25 @@ function importDocuments(): void {
 // 메인
 // ---------------------------------------------------------------------------
 
-console.log("\n=== 에이전트 임포트 ===");
-importAgents();
+async function main(): Promise<void> {
+  ensureSchema();
+  ({ createBlockDef, createDocument, listBlockDefs, listDocuments } =
+    await import("../src/lib/db/queries"));
 
-console.log("\n=== 문서 임포트 ===");
-importDocuments();
+  console.log("\n=== 에이전트 임포트 ===");
+  importAgents();
 
-console.log("\n=== 완료 ===");
-console.log(
-  `block_defs: 생성 ${blockDefsCreated}개 / 갱신 ${blockDefsUpdated}개`,
-);
-console.log(`documents : 생성 ${docsCreated}개 / 스킵 ${docsSkipped}개`);
+  console.log("\n=== 문서 임포트 ===");
+  importDocuments();
+
+  console.log("\n=== 완료 ===");
+  console.log(
+    `block_defs: 생성 ${blockDefsCreated}개 / 갱신 ${blockDefsUpdated}개`,
+  );
+  console.log(`documents : 생성 ${docsCreated}개 / 스킵 ${docsSkipped}개`);
+}
+
+void main().catch((error: unknown) => {
+  console.error("[importer] 실패:", error);
+  process.exit(1);
+});
