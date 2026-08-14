@@ -4,7 +4,7 @@
 //
 // 실행: RECRUIT_FLOW_DB_PATH=... node .node22 tsx scripts/smoke-engine.ts
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 
@@ -14,13 +14,15 @@ if (!DB_PATH) throw new Error("RECRUIT_FLOW_DB_PATH 필요");
 
 {
   const raw = new Database(DB_PATH);
-  const migration = readFileSync(
-    path.join(process.cwd(), "drizzle", "0000_mighty_invisible_woman.sql"),
-    "utf8",
-  );
-  for (const stmt of migration.split("--> statement-breakpoint")) {
-    const s = stmt.trim();
-    if (s) raw.exec(s);
+  // 모든 마이그레이션을 파일명 순서대로 적용(특정 파일 하드코딩 금지 —
+  // 새 마이그레이션이 추가되면 스모크가 조용히 낡은 스키마로 돈다).
+  const migDir = path.join(process.cwd(), "drizzle");
+  for (const f of readdirSync(migDir).filter((f) => f.endsWith(".sql")).sort()) {
+    const migration = readFileSync(path.join(migDir, f), "utf8");
+    for (const stmt of migration.split("--> statement-breakpoint")) {
+      const s = stmt.trim();
+      if (s) raw.exec(s);
+    }
   }
   raw.close();
 }
@@ -641,6 +643,148 @@ async function testRecovery() {
 }
 
 // ===========================================================================
+// [c3] gate_decision 영속화 + Gate(maxLoops 소진) + Human 재하이드레이션
+//
+// 과거 결함: gateDecision이 인메모리라 재하이드레이션 시
+// "succeeded Gate의 최대 회차 = pass" 휴리스틱으로 재구성했다. 그런데
+// maxLoops 소진 시 Gate는 succeeded + 결정 fail로 마감하고 다음 회차를
+// 만들지 않으므로, **최대 회차가 fail인데 pass로 뒤집혀** 재개 후
+// pass-하류(Output)가 실행됐다. 이제 DB(node_runs.gate_decision)를 읽는다.
+// ===========================================================================
+async function testGateDecisionPersisted() {
+  console.log("\n[c3] gate_decision 영속화 + Gate maxLoops + Human 재하이드레이션");
+
+  // --- (1) 영속화: 실제 run으로 기록되는 값 확인 ---------------------------
+  const { pl: pl1, gate: gate1 } = await buildGatePipeline("smoke-gate-decision", 2);
+  stubTable = [
+    { match: (p) => p.systemPrompt.startsWith("ROLE_writer"), fn: async () => ({ text: "# 초안(항상 낮음)" }) },
+    { match: (p) => p.systemPrompt.startsWith("ROLE_screen"), fn: async () => ({ text: JSON.stringify({ total: 50 }) }) },
+  ];
+  const res1 = runner.start(pl1.id);
+  if ("errors" in res1) throw new Error(JSON.stringify(res1.errors));
+  await waitFor(res1.runId, TERMINAL);
+
+  const gateRows = nodeRunsOf(res1.runId)
+    .filter((n) => n.nodeId === gate1.id)
+    .sort((a, b) => a.iteration - b.iteration);
+  check("Gate node_run이 회차별로 기록됨", gateRows.length >= 2, `rows=${gateRows.length}`);
+  check(
+    "모든 Gate 회차의 gate_decision = fail(항상 낮은 점수)",
+    gateRows.every((r) => r.gateDecision === "fail"),
+    `decisions=${gateRows.map((r) => r.iteration + ":" + r.gateDecision)}`,
+  );
+  // 이게 핵심 — 옛 휴리스틱이라면 최대 회차를 pass로 뒤집었다.
+  check(
+    "maxLoops 소진 시 최대 회차도 fail(휴리스틱이면 pass로 뒤집힘)",
+    gateRows[gateRows.length - 1].gateDecision === "fail",
+    `maxIter=${gateRows[gateRows.length - 1].iteration}:${gateRows[gateRows.length - 1].gateDecision}`,
+  );
+  check(
+    "Gate 외 노드의 gate_decision은 null",
+    nodeRunsOf(res1.runId)
+      .filter((n) => n.nodeId !== gate1.id)
+      .every((n) => n.gateDecision === null),
+  );
+  // pass가 나는 경우도 기록되는지(대조군).
+  const { pl: pl2, gate: gate2 } = await buildGatePipeline("smoke-gate-decision-pass", 3);
+  stubTable = [
+    { match: (p) => p.systemPrompt.startsWith("ROLE_writer"), fn: async () => ({ text: "# 초안" }) },
+    { match: (p) => p.systemPrompt.startsWith("ROLE_screen"), fn: async () => ({ text: JSON.stringify({ total: 95 }) }) },
+  ];
+  const res2 = runner.start(pl2.id);
+  if ("errors" in res2) throw new Error(JSON.stringify(res2.errors));
+  await waitFor(res2.runId, TERMINAL);
+  check(
+    "pass Gate의 gate_decision = pass",
+    nodeRunsOf(res2.runId)
+      .filter((n) => n.nodeId === gate2.id)
+      .every((r) => r.gateDecision === "pass"),
+  );
+
+  // --- (2) 재하이드레이션: Gate(fail) + Human 대기 조합 -------------------
+  // testRecovery와 같은 방식으로 DB 상태를 직접 구성해 승인 경로만 격리 검증.
+  //
+  // 이 시나리오는 두 결함을 동시에 잡는다(둘 다 있어야 통과):
+  //  (a) gate_decision을 DB에서 읽지 않고 "최대 회차=pass" 휴리스틱을 쓰면
+  //      Gate 최종 결정이 fail인데 pass-하류 Output이 succeeded로 실행된다.
+  //  (b) rehydrateForApproval의 runHuman은 drive()의 inFlight에 없어서
+  //      완료 시 wake가 없다 → 승인해도 드라이버가 깨지 않아 run이 running에
+  //      영원히 머문다(아래 "재개되어 종결" 검사가 이를 잡는다).
+  const pl = createPipeline("smoke-gate-human-rehydrate");
+  const jd = node(pl.id, "input", "JD", { inlineText: "JD 본문" });
+  const writer = node(pl.id, "agent", "writer", { role: "ROLE_writer", outputFormat: "markdown" });
+  const screen = node(pl.id, "agent", "screen", { role: "ROLE_screen", outputFormat: "json", jsonSchema: "{total:number}" });
+  const gate = node(pl.id, "gate", "gate", { expr: "screen.total >= 80", maxLoops: 2, failTargetNodeId: writer.id });
+  const out = node(pl.id, "output", "OUT", { templateId: "default" });
+  const human = node(pl.id, "human", "검토", { instruction: "검토해 주세요" });
+  saveGraph(pl.id, {
+    nodes: [jd, writer, screen, gate, out, human],
+    edges: [
+      edge(pl.id, jd, writer),
+      edge(pl.id, writer, screen),
+      edge(pl.id, writer, gate, { inputOrder: 0 }),
+      edge(pl.id, screen, gate, { inputOrder: 1 }),
+      edge(pl.id, gate, out, { sourceHandle: "pass" }),
+      edge(pl.id, gate, writer, { sourceHandle: "fail" }),
+      // Human은 별도 분기 — Gate가 소진돼도 이 분기가 run을 붙잡는다.
+      edge(pl.id, jd, human),
+    ],
+  });
+
+  const {
+    createRun,
+    createNodeRun,
+    getGraph,
+    setNodeRunGateDecision,
+    createArtifact,
+    finalizeArtifact,
+  } = await import("../src/lib/db/queries");
+  const g = getGraph(pl.id);
+  const run = createRun(pl.id, g, null);
+  db.update(runsTable).set({ status: "waiting_human" }).where(eq(runsTable.id, run.id)).run();
+
+  createNodeRun(run.id, jd.id, "succeeded", 1);
+  const wnr = createNodeRun(run.id, writer.id, "succeeded", 1);
+  const snr = createNodeRun(run.id, screen.id, "succeeded", 1);
+  // Gate 2회차 모두 fail — 2회차가 최대 회차이자 maxLoops 소진 지점.
+  const gnr1 = createNodeRun(run.id, gate.id, "succeeded", 1);
+  const gnr2 = createNodeRun(run.id, gate.id, "succeeded", 2);
+  setNodeRunGateDecision(gnr1.id, "fail");
+  setNodeRunGateDecision(gnr2.id, "fail");
+  const hnr = createNodeRun(run.id, human.id, "waiting_human", 1);
+
+  // Gate 하류가 입력을 구성할 수 있도록 상류 아티팩트를 채운다.
+  const wArt = createArtifact(wnr.id, "markdown");
+  finalizeArtifact(wArt.id, "# 초안");
+  const sArt = createArtifact(snr.id, "json");
+  finalizeArtifact(sArt.id, JSON.stringify({ total: 50 }));
+
+  // 승인 → rehydrateForApproval이 gateDecision을 DB에서 복원한다.
+  const approveRes = runner.approve(hnr.id);
+  check("Human 승인 수락됨", approveRes.ok, JSON.stringify(approveRes));
+
+  // (b) 재개 검사 — wake가 없으면 여기서 running에 머물러 타임아웃 난다.
+  const finalStatus = await waitFor(run.id, TERMINAL, 10000).catch(() => "timeout");
+  check(
+    "재하이드레이션 승인 후 드라이버가 재개되어 run 종결",
+    finalStatus !== "timeout",
+    `status=${finalStatus}(재개 wake 누락 시 running 고착)`,
+  );
+
+  // (a) 라우팅 검사 — 휴리스틱이면 Output이 succeeded로 실행된다.
+  const outNrs = nodeRunsOf(run.id).filter((n) => n.nodeId === out.id);
+  check(
+    "재하이드레이션 후 pass-하류 Output 미실행(Gate 최종 결정=fail)",
+    !outNrs.some((n) => n.status === "succeeded"),
+    `outNrs=${outNrs.map((n) => n.iteration + ":" + n.status)}`,
+  );
+  check(
+    "재하이드레이션 후 Output HTML 아티팩트 없음",
+    outNrs.every((n) => !artifactOf(n.id)),
+  );
+}
+
+// ===========================================================================
 // main
 // ===========================================================================
 async function main() {
@@ -652,6 +796,7 @@ async function main() {
   await testGatePassImmediate();
   await testGateMaxLoops();
   await testGateParallelFailedNoOutput();
+  await testGateDecisionPersisted();
   await testHuman();
   await testPartialRerun();
   await testCancel();

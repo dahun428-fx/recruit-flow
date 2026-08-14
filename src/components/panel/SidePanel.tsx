@@ -608,6 +608,27 @@ function Artifacts({
     }
   }
 
+  // 승인 컨트롤 — 아티팩트 유무와 무관하게 Human 대기 상태면 항상 필요하다.
+  // (Human 노드가 아티팩트 없이 waiting_human이 되는 경우가 있어, 예전에는
+  //  아티팩트 조건부 렌더 안에 묻혀 승인 자체가 불가능했다.)
+  const approveActions = (
+    <div className={styles.humanActions}>
+      {humanConfig?.instruction && (
+        <div className={styles.humanInstruction}>{humanConfig.instruction}</div>
+      )}
+      <button
+        className={styles.approveBtn}
+        onClick={handleApprove}
+        disabled={approving || status !== "waiting_human"}
+        data-testid="human-approve"
+        data-tip="이 노드의 아티팩트를 승인하고 파이프라인 실행을 재개합니다"
+      >
+        {approving ? "승인 중…" : "승인"}
+      </button>
+      {approveMsg && <span className={styles.approveMsg}>{approveMsg}</span>}
+    </div>
+  );
+
   if (!run) {
     return (
       <>
@@ -629,6 +650,7 @@ function Artifacts({
             ? "이 노드의 아티팩트를 기다리는 중…"
             : "이번 run에서 아직 실행되지 않은 노드입니다."}
         </div>
+        {isHuman && status === "waiting_human" && approveActions}
       </>
     );
   }
@@ -692,38 +714,32 @@ function Artifacts({
         </>
       )}
 
-      {/* Human 노드: 편집 가능 텍스트 + 승인 버튼 */}
-      {isHuman && artifact.format === "markdown" && (
+      {/* Human 노드: 편집 가능 텍스트 + 승인 버튼.
+          승인 버튼은 아티팩트 형식과 무관하게 항상 렌더한다(마크다운이
+          아니면 편집기 대신 원문만 보여준다). */}
+      {isHuman && (
         <>
-          {humanConfig?.allowEdit ? (
-            <div className={styles.field}>
-              <label data-tip="내용을 직접 편집 후 승인할 수 있습니다">편집</label>
-              <textarea
-                value={editContent ?? artifact.content}
-                rows={10}
-                onChange={(e) => setEditContent(e.target.value)}
-              />
-            </div>
+          {artifact.format === "markdown" ? (
+            humanConfig?.allowEdit ? (
+              <div className={styles.field}>
+                <label data-tip="내용을 직접 편집 후 승인할 수 있습니다">편집</label>
+                <textarea
+                  value={editContent ?? artifact.content}
+                  rows={10}
+                  onChange={(e) => setEditContent(e.target.value)}
+                />
+              </div>
+            ) : (
+              <div className={styles.artifact}>
+                <div dangerouslySetInnerHTML={{ __html: renderedMd }} />
+              </div>
+            )
           ) : (
             <div className={styles.artifact}>
-              <div dangerouslySetInnerHTML={{ __html: renderedMd }} />
+              <pre className={styles.jsonView}>{artifact.content}</pre>
             </div>
           )}
-          <div className={styles.humanActions}>
-            {humanConfig?.instruction && (
-              <div className={styles.humanInstruction}>{humanConfig.instruction}</div>
-            )}
-            <button
-              className={styles.approveBtn}
-              onClick={handleApprove}
-              disabled={approving || status !== "waiting_human"}
-              data-testid="human-approve"
-              data-tip="이 노드의 아티팩트를 승인하고 파이프라인 실행을 재개합니다"
-            >
-              {approving ? "승인 중…" : "승인"}
-            </button>
-            {approveMsg && <span className={styles.approveMsg}>{approveMsg}</span>}
-          </div>
+          {approveActions}
         </>
       )}
 

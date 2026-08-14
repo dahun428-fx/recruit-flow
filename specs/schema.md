@@ -86,8 +86,16 @@
 | node_id | text | 스냅샷 내 노드 id |
 | iteration | integer | Gate 루프 회차(1부터). 회차 칩·진행 표시 근거 |
 | status | text | `queued` / `running` / `waiting_human` / `succeeded` / `failed` / `skipped` |
+| gate_decision | text nullable | Gate 노드 전용 — `pass` / `fail`. Gate 외 노드는 항상 null |
 | error | text nullable | |
 | started_at / ended_at | integer | |
+
+**gate_decision**: Gate는 순수 라우터라 아티팩트를 남기지 않고 판정 후
+항상 `succeeded`로 마감한다(결정은 상태가 아니라 라우팅으로 표현). 따라서
+"이 Gate가 pass였나 fail이었나"는 status만으로 복원할 수 없다. 프로세스
+재시작·`waiting_human` 재하이드레이션 시 pass-엣지 하류를 실행해도 되는지
+판정하려면 이 값이 반드시 DB에 있어야 한다(engine.md §1 재시작 복구).
+회차별로 다르므로 run 단위가 아니라 node_run 행에 기록한다.
 
 ### artifacts
 

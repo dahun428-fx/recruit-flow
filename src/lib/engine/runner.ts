@@ -11,6 +11,7 @@ import {
   getGraph,
   getRun,
   getRunSnapshot,
+  setNodeRunGateDecision,
   setNodeRunStatus,
   setRunStatus,
 } from "../db/queries";
@@ -537,13 +538,13 @@ class Runner {
     // Gate는 아티팩트를 만들지 않는다(순수 라우터). node_run만 succeeded.
     // 라우팅 결정을 기록 — pickReady가 pass/fail 하류를 이 결정과 대조한다.
     if (pass) {
-      control.gateDecision.set(keyOf(node.id, iter), "pass");
+      this.recordGateDecision(control, node.id, nodeRunId, iter, "pass");
       this.markNode(control, node.id, nodeRunId, iter, "succeeded");
       control.succeeded.add(keyOf(node.id, iter));
       this.emitRunStatus(control, "running");
       return;
     }
-    control.gateDecision.set(keyOf(node.id, iter), "fail");
+    this.recordGateDecision(control, node.id, nodeRunId, iter, "fail");
 
     // fail: maxLoops 판정. 이 Gate가 이미 몇 번 fail 했는가 = gate 노드 회차.
     const loopCount = iter; // Gate 노드의 회차 = 실행 횟수.
@@ -804,19 +805,13 @@ class Runner {
         control.handled.add(key);
       }
     }
-    // Gate 라우팅 결정 재구성(gateDecision은 인메모리라 재시작 시 유실).
-    // succeeded Gate가 자신의 최대 회차면 pass(하류로 흘려보냄), 더 높은 회차가
-    // 있으면 그 회차는 fail(루프해서 다음 회차를 만든 것). 이 재구성이 없으면
-    // rehydrate 후 pass-하류가 영영 ready가 되지 못한다.
-    for (const n of snapshot.nodes) {
-      if (n.type !== "gate") continue;
-      const gateIters = rows
-        .filter((r) => r.nodeId === n.id && r.status === "succeeded")
-        .map((r) => r.iteration);
-      if (gateIters.length === 0) continue;
-      const maxIter = Math.max(...gateIters);
-      for (const it of gateIters) {
-        control.gateDecision.set(keyOf(n.id, it), it === maxIter ? "pass" : "fail");
+    // Gate 라우팅 결정 복원 — DB에 기록된 값을 그대로 읽는다.
+    // (이전에는 "succeeded Gate의 최대 회차 = pass" 휴리스틱이었으나,
+    //  maxLoops 소진 시 Gate는 succeeded+fail로 마감하고 다음 회차를 만들지
+    //  않으므로 최대 회차가 fail인 경우를 pass로 뒤집는 버그가 있었다.)
+    for (const r of rows) {
+      if (r.gateDecision === "pass" || r.gateDecision === "fail") {
+        control.gateDecision.set(keyOf(r.nodeId, r.iteration), r.gateDecision);
       }
     }
     // 대기 노드는 handled로 두되 succeeded/failed 아님 — 드라이버가 재개 후 처리.
@@ -829,8 +824,16 @@ class Runner {
     this.controls.set(run.id, control);
 
     // Human 노드 재개 태스크를 붙이고 드라이버 시작.
+    // ★ 이 태스크는 drive()의 inFlight에 없으므로(=완료 시 자동 wake가 없다)
+    //   반드시 여기서 직접 깨워야 한다. 그러지 않으면 승인 후 Human만
+    //   succeeded가 되고 드라이버는 waitForWake에 영원히 머문다 — 재시작 후
+    //   승인 시 파이프라인이 재개되지 않는 결함이었다.
     control.handled.add(keyOf(humanNr.nodeId, humanNr.iteration));
-    void this.runHuman(control, node, nodeRunId, humanNr.iteration).catch(() => {});
+    void this.runHuman(control, node, nodeRunId, humanNr.iteration)
+      .catch(() => {})
+      .finally(() => {
+        control.wake?.();
+      });
     this.launch(control);
     return true;
   }
@@ -967,6 +970,22 @@ class Runner {
   ): void {
     setNodeRunStatus(nodeRunId, status, error ?? null);
     this.emitNodeStatus(control, nodeId, nodeRunId, iteration, status);
+  }
+
+  /**
+   * Gate 라우팅 결정을 인메모리 맵과 DB에 동시 기록.
+   * 인메모리는 현재 run의 빠른 경로, DB는 재시작·재하이드레이션의 진실
+   * (schema.md node_runs.gate_decision).
+   */
+  private recordGateDecision(
+    control: RunControl,
+    nodeId: string,
+    nodeRunId: string,
+    iteration: number,
+    decision: "pass" | "fail",
+  ): void {
+    control.gateDecision.set(keyOf(nodeId, iteration), decision);
+    setNodeRunGateDecision(nodeRunId, decision);
   }
 
   private emitNodeStatus(

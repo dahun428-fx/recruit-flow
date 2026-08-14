@@ -1,0 +1,1 @@
+ALTER TABLE `node_runs` ADD `gate_decision` text;

@@ -3,6 +3,7 @@
 // POST /api/block-defs        → BlockDef    (블록 정의 생성 — 승격/임포터/수동 생성)
 import { NextResponse } from "next/server";
 import { createBlockDef, listBlockDefs } from "@/lib/db/queries";
+import { eventBus } from "@/lib/engine/events";
 import type { NodeConfig, NodeType } from "@/lib/types";
 
 export async function GET(req: Request) {
@@ -38,5 +39,7 @@ export async function POST(req: Request) {
     tray: body.tray,
   });
 
+  // 트레이는 전역 → 열려 있는 모든 pipeline 채널에 통지(engine.md §3).
+  eventBus.emitBlockDef("updated", created.id, created);
   return NextResponse.json(created, { status: 201 });
 }

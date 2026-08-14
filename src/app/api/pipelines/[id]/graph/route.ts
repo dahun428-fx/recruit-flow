@@ -2,6 +2,7 @@
 // PUT /api/pipelines/[id]/graph  { nodes, edges } → { ok }
 import { NextResponse } from "next/server";
 import { getGraph, getPipeline, saveGraph } from "@/lib/db/queries";
+import { validateGraphPayload } from "@/lib/validation";
 import type { EdgeRow, NodeRow } from "@/lib/types";
 
 export async function GET(
@@ -30,6 +31,14 @@ export async function PUT(
   if (!body || !Array.isArray(body.nodes) || !Array.isArray(body.edges)) {
     return NextResponse.json(
       { error: "nodes and edges arrays are required" },
+      { status: 400 },
+    );
+  }
+  // 구조 검증(engine.md §2) — DB 제약 위반이 500으로 새어나가지 않게.
+  const errors = validateGraphPayload(body.nodes, body.edges);
+  if (errors.length > 0) {
+    return NextResponse.json(
+      { error: errors[0], errors },
       { status: 400 },
     );
   }

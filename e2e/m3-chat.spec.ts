@@ -13,24 +13,10 @@ test("M3: 채팅 입력 '블록 만들어줘' → card_block → 트레이 표�
   await page.locator('[data-testid="chat-input"]').fill("비평가 블록 만들어줘");
   await page.locator('[data-testid="chat-send"]').click();
 
-  // card_block 메시지가 DB에 저장될 때까지 API 폴링
-  // (SSE 타이밍 이슈 우회 — card_block은 appendChatMessage로 DB에 기록됨)
-  await expect.poll(
-    async () => {
-      const res = await request.get(`/api/pipelines/${pipelineId}/messages`);
-      const msgs = (await res.json()) as ChatMessage[];
-      return msgs.some((m) => m.kind === "card_block");
-    },
-    { timeout: 20_000, intervals: [500] },
-  ).toBe(true);
-
-  // SSE 이벤트가 이미 발사됐을 수 있으므로(연결 전) 페이지 새로고침으로
-  // loadMessages() 재실행 → card_block UI 확인
-  await page.reload();
-  await expect(page.locator('[data-testid="chat-input"]')).toBeVisible({ timeout: 15_000 });
-
-  // card_block 카드 확인
-  await expect(page.locator('[data-kind="card_block"]').first()).toBeVisible({ timeout: 10_000 });
+  // card_block 카드가 **새로고침 없이** SSE로 도착해야 한다.
+  // (구독 선행 + 버퍼 병합 — engine.md §3. 예전에는 로드~구독 사이 창에
+  //  이벤트가 유실돼 page.reload()로 우회했다.)
+  await expect(page.locator('[data-kind="card_block"]').first()).toBeVisible({ timeout: 30_000 });
 
   // 트레이 항목 확인 (block_def가 DB에 저장됨)
   await expect(page.locator('[data-testid^="tray-item-"]').first()).toBeVisible({ timeout: 10_000 });
@@ -83,21 +69,9 @@ test("M3: '작성해줘' → card_run 카드", async ({
   await page.locator('[data-testid="chat-input"]').fill("작성해줘");
   await page.locator('[data-testid="chat-send"]').click();
 
-  // card_run 메시지가 DB에 기록될 때까지 API 폴링
-  // (trigger_run은 runner.start → card_run을 emitChatCard로 pipeline 채널에 발행)
-  await expect.poll(
-    async () => {
-      const res = await request.get(`/api/pipelines/${pipelineId}/messages`);
-      const msgs = (await res.json()) as ChatMessage[];
-      return msgs.some((m) => m.kind === "card_run");
-    },
-    { timeout: 30_000, intervals: [500] },
-  ).toBe(true);
-
-  // 페이지 새로고침으로 loadMessages() 재실행 → card_run 카드 표시 확인
-  await page.reload();
-  await expect(page.locator('[data-testid="chat-input"]')).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator('[data-kind="card_run"]').first()).toBeVisible({ timeout: 10_000 });
+  // card_run 카드가 **새로고침 없이** SSE로 도착해야 한다(구독 선행 — engine.md §3).
+  // trigger_run은 runner.start → card_run을 emitChatCard로 pipeline 채널에 발행.
+  await expect(page.locator('[data-kind="card_run"]').first()).toBeVisible({ timeout: 30_000 });
 });
 
 test("M3: 새로고침 스레드 복원", async ({

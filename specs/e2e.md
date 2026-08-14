@@ -4,7 +4,7 @@
 AI가 자동 수정하는 힐링 루프. 스모크(엔진 73·챗 38)가 못 덮는 UI·HTTP
 경로를 덮는다.
 
-## 명령 (★ 반드시 Node 22: `.node22\npm.cmd run ...`)
+## 명령 (★ 반드시 Node 22 — 공급 방식은 머신별, CLAUDE.md 참조)
 
 | 명령 | 용도 |
 | --- | --- |
@@ -69,13 +69,34 @@ enabled") → `claude -p`가 원인 진단·`disabled={!run.canRun || run.busy}`
 백그라운드 실행 창(~10분)으론 한 번에 완주가 어려울 수 있다(루프 자체·구성
 요소는 검증됨).
 
-## e2e가 발견한 실 앱 결함 (후속 대상, 스펙은 우회)
+## e2e가 발견한 실 앱 결함 → **해결(2026-08-14)**
 
-1. SSE 경쟁 조건(ChatDock/usePipelineStream): hydration~effect 사이 발행
-   이벤트 유실, `onerror` 재조회 없음.
-2. SidePanel Human 승인 버튼: artifact 없으면 조건부 렌더에서 제외.
-3. `useRunStream`: waiting_human 이후 SSE 재구독 누락.
-4. transient 카드(card_human 등) SSE 끊김 후 복원 불가.
+1. ~~SSE 경쟁 조건(ChatDock/usePipelineStream)~~ → **해결**: 구독 선행 +
+   버퍼 병합(engine.md §3). `page.reload()` 우회 2건 제거.
+2. ~~SidePanel Human 승인 버튼: artifact 없으면 렌더 안 됨~~ → **해결**:
+   승인 컨트롤을 아티팩트 조건부 렌더 밖으로 분리.
+3. ~~`useRunStream`: waiting_human 이후 SSE 재구독 누락~~ → **해결**:
+   종결 상태(succeeded/failed/cancelled)에서만 구독 종료.
+4. ~~transient 카드 SSE 끊김 후 복원 불가~~ → **해결**: 끊김 시 스냅샷
+   재조회 후 재연결(양 훅 동일 절차). `card_human`은 원래 DB에 있었고,
+   문제는 재조회 경로 부재였다.
+
+### 이 과정에서 새로 발견·수정된 결함
+
+5. **재시작 후 승인 시 파이프라인이 재개되지 않음**(러너).
+   `rehydrateForApproval`이 `runHuman`을 `drive()`의 inFlight 밖에서
+   띄워, 완료 시 wake가 없어 드라이버가 `waitForWake`에 영구 정박했다.
+   Human만 succeeded가 되고 run은 `running`에 고착. → `.finally`로 wake.
+   이 결함이 4번·gate_decision 결함을 **가리고 있었다**(하류가 아예 안
+   돌아서 잘못된 라우팅이 드러나지 않음).
+6. **마이그레이션을 첫 파일만 적용**: `start-server.mjs`·스모크 2종이
+   `.sort()[0]` / 파일명 하드코딩이라 0001 이후가 적용되지 않았다.
+   → 전부 순서대로 적용.
+7. **`PUT /graph` 구조 검증 부재**: 필드 누락·중복 id가 DB 제약 위반
+   그대로 500이 됐다(engine.md §2). → 400 + 사유.
+
+검증 규율: 회귀 테스트는 **고치기 전 코드에서 실패하는 것을 확인**한 뒤
+채택한다(대조군 실행). 통과만으로는 아무것도 증명하지 못한다.
 
 (참고: `download-html` testid가 FlowNode·SidePanel 양쪽에 있어 `.first()`
 사용 스펙은 한쪽만 고장나도 통과 — testid 유일화가 이상적.)

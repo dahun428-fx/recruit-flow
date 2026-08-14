@@ -145,6 +145,13 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
     loadBlockDefs();
   }, [loadBlockDefs]);
 
+  // 트레이 변경 브로드캐스트(block_def SSE, engine.md §3) → 재조회.
+  // 다른 탭에서 승인·거절해도 새로고침 없이 반영된다.
+  useEffect(() => {
+    window.addEventListener("rf:blockDefsChanged", loadBlockDefs);
+    return () => window.removeEventListener("rf:blockDefsChanged", loadBlockDefs);
+  }, [loadBlockDefs]);
+
   // U4: rf:trayHighlight 이벤트 수신 → 팔레트 트레이 해당 항목 하이라이트
   useEffect(() => {
     function onTrayHighlight(e: Event) {

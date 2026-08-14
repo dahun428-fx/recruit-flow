@@ -229,6 +229,8 @@ export interface NodeRun {
   /** Gate 루프 회차(1부터). 같은 nodeId에 여러 행 가능 */
   iteration: number;
   status: NodeRunStatus;
+  /** Gate 전용 라우팅 결정. Gate 외 노드는 null(schema.md) */
+  gateDecision: "pass" | "fail" | null;
   error: string | null;
   startedAt: number | null;
   endedAt: number | null;
@@ -367,10 +369,22 @@ export interface ChatMessageEvent {
  *   / { event: 'waiting'; instruction; excerpt } / { event: 'approved' }
  */
 
+/**
+ * 트레이(block_defs) 변경 통지. block_defs에는 pipeline_id가 없는 **전역**
+ * 테이블이므로 열려 있는 모든 pipeline 채널에 브로드캐스트한다(engine.md §3).
+ */
+export interface BlockDefEvent {
+  type: "block_def";
+  action: "updated" | "deleted";
+  blockDefId: string;
+  blockDef?: BlockDef;
+}
+
 export type SseEvent =
   | RunStatusEvent
   | NodeStatusEvent
   | ArtifactDeltaEvent
   | ChatCardEvent
   | ChatDeltaEvent
-  | ChatMessageEvent;
+  | ChatMessageEvent
+  | BlockDefEvent;

@@ -33,6 +33,82 @@ function emitsJson(node: NodeRow): boolean {
 }
 
 /**
+ * 그래프 PUT **구조** 검증(engine.md §2). 문제 없으면 빈 배열.
+ *
+ * validateGraph(아래)는 run 시작 전 **의미** 검증이고, 이건 쓰기 시점의
+ * 형태 검증이다. DB 제약 위반이 그대로 새어나가 500이 되는 것을 막는 게
+ * 목적 — 위반은 전부 400 + 한국어 사유로 돌려준다.
+ *
+ * UI는 항상 완전한 그래프를 보내므로 영향받지 않는다. 스크립트·curl·
+ * 임포터 등 API를 직접 호출하는 경로를 위한 방어선이다.
+ */
+export function validateGraphPayload(
+  nodes: unknown,
+  edges: unknown,
+): string[] {
+  const errors: string[] = [];
+  if (!Array.isArray(nodes) || !Array.isArray(edges)) {
+    return ["nodes와 edges는 배열이어야 합니다."];
+  }
+
+  const isNonEmptyString = (v: unknown): v is string =>
+    typeof v === "string" && v.trim() !== "";
+
+  const nodeIds = new Set<string>();
+  nodes.forEach((raw, i) => {
+    const n = raw as Record<string, unknown>;
+    const where = `nodes[${i}]`;
+    if (!n || typeof n !== "object") {
+      errors.push(`${where}: 객체가 아닙니다.`);
+      return;
+    }
+    for (const f of ["id", "type", "name"] as const) {
+      if (!isNonEmptyString(n[f])) errors.push(`${where}.${f}: 비어 있지 않은 문자열이어야 합니다.`);
+    }
+    for (const f of ["positionX", "positionY"] as const) {
+      if (typeof n[f] !== "number" || !Number.isFinite(n[f])) {
+        errors.push(`${where}.${f}: 숫자여야 합니다.`);
+      }
+    }
+    // config는 JSON 컬럼(NOT NULL) — null/undefined면 저장 시 제약 위반.
+    if (n.config === undefined || n.config === null) {
+      errors.push(`${where}.config: 필수입니다(빈 객체 {} 허용).`);
+    }
+    if (isNonEmptyString(n.id)) {
+      if (nodeIds.has(n.id)) errors.push(`${where}.id: 중복된 노드 id '${n.id}'.`);
+      nodeIds.add(n.id);
+    }
+  });
+
+  const edgeIds = new Set<string>();
+  edges.forEach((raw, i) => {
+    const e = raw as Record<string, unknown>;
+    const where = `edges[${i}]`;
+    if (!e || typeof e !== "object") {
+      errors.push(`${where}: 객체가 아닙니다.`);
+      return;
+    }
+    for (const f of ["id", "sourceNodeId", "targetNodeId"] as const) {
+      if (!isNonEmptyString(e[f])) errors.push(`${where}.${f}: 비어 있지 않은 문자열이어야 합니다.`);
+    }
+    if (isNonEmptyString(e.id)) {
+      if (edgeIds.has(e.id)) errors.push(`${where}.id: 중복된 엣지 id '${e.id}'.`);
+      edgeIds.add(e.id);
+    }
+    // edges에는 nodes FK가 없어 dangling edge가 조용히 저장된다.
+    // validateGraph는 런타임에 이를 무시하므로 쓰기 시점에 드러낸다.
+    for (const f of ["sourceNodeId", "targetNodeId"] as const) {
+      const v = e[f];
+      if (isNonEmptyString(v) && !nodeIds.has(v)) {
+        errors.push(`${where}.${f}: 존재하지 않는 노드 '${v}'를 가리킵니다.`);
+      }
+    }
+  });
+
+  return errors;
+}
+
+/**
  * run 시작 전 그래프 검증. 문제 없으면 빈 배열.
  * M1은 실선(flow) 엣지만 존재한다고 가정.
  */

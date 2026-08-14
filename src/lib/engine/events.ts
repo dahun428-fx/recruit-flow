@@ -5,6 +5,7 @@
 import { appendChatMessage } from "../db/queries";
 import type {
   ArtifactDeltaEvent,
+  BlockDef,
   ChatMessage,
   ChatMessageKind,
   NodeStatusEvent,
@@ -130,6 +131,32 @@ class RunEventBus {
    */
   emitChatMessage(pipelineId: string, message: ChatMessage): void {
     this.emitToPipeline(pipelineId, { type: "chat_message", message });
+  }
+
+  /**
+   * 열려 있는 **모든** pipeline 채널에 발행(engine.md §3).
+   * block_defs처럼 pipeline_id가 없는 전역 테이블의 변경 통지용 —
+   * 특정 채널을 고를 수 없으므로 브로드캐스트가 유일하게 옳은 라우팅이다.
+   */
+  emitToAllPipelines(event: SseEvent): void {
+    for (const set of this.pipelineSubscribers.values()) {
+      for (const fn of set) {
+        try {
+          fn(event);
+        } catch {
+          // 개별 구독자 오류는 발행을 막지 않는다.
+        }
+      }
+    }
+  }
+
+  /** 트레이 변경 통지(block_defs는 전역 → 전 채널 브로드캐스트). */
+  emitBlockDef(
+    action: "updated" | "deleted",
+    blockDefId: string,
+    blockDef?: BlockDef,
+  ): void {
+    this.emitToAllPipelines({ type: "block_def", action, blockDefId, blockDef });
   }
 
   /** 구독자 존재 여부(디버그·테스트용). */

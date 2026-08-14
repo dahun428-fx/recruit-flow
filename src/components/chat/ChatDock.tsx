@@ -86,6 +86,10 @@ export function ChatDock({ scrollToNodeId, onScrollHandled }: Props) {
     onMessages: (msgs) => {
       setMessages(msgs);
     },
+    // 트레이 변경 통지 → Palette가 재조회(기존 rf:* 커스텀 이벤트 관례).
+    onBlockDefChanged: () => {
+      window.dispatchEvent(new CustomEvent("rf:blockDefsChanged"));
+    },
     onChatDelta: (messageId, chunk) => {
       setStreamingMsgId(messageId);
       setStreamingMap((prev) => ({

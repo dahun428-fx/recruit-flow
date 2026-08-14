@@ -276,6 +276,8 @@ export function buildChatbotMcp(
         };
         const message = appendChatMessage(pipelineId, "card_block", payload);
         eventBus.emitChatMessage(pipelineId, message);
+        // 트레이 갱신 통지 — 카드가 가리키는 항목이 팔레트에도 즉시 보이도록.
+        eventBus.emitBlockDef("updated", def.id, def);
         return textResult(
           `블록 '${def.name}'(${def.type})을 트레이에 추가했습니다. ` +
             `팔레트의 '새 블록' 트레이에서 캔버스로 드래그해 배치·배선하세요.`,

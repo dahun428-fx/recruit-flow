@@ -361,6 +361,8 @@ export function createNodeRun(
     nodeId,
     iteration,
     status,
+    // Gate 판정 시에만 채워진다(setNodeRunGateDecision).
+    gateDecision: null as string | null,
     error: null as string | null,
     startedAt: status === "running" ? now() : null,
     endedAt: null as number | null,
@@ -383,6 +385,21 @@ export function setNodeRunStatus(
   db.update(nodeRuns).set(patch).where(eq(nodeRuns.id, nodeRunId)).run();
   const row = db.select().from(nodeRuns).where(eq(nodeRuns.id, nodeRunId)).get();
   return row ? toNodeRun(row) : null;
+}
+
+/**
+ * Gate 라우팅 결정을 node_run에 영속화(schema.md).
+ * Gate는 판정 후 항상 succeeded로 마감하므로 status만으로는 pass/fail을
+ * 복원할 수 없다 — 재시작·재하이드레이션이 이 값을 읽는다.
+ */
+export function setNodeRunGateDecision(
+  nodeRunId: string,
+  decision: "pass" | "fail",
+): void {
+  db.update(nodeRuns)
+    .set({ gateDecision: decision })
+    .where(eq(nodeRuns.id, nodeRunId))
+    .run();
 }
 
 /** 노드 실행 1회 = 아티팩트 1개. 스트리밍 시작 시 빈 content로 생성. */
@@ -748,6 +765,7 @@ function toNodeRun(r: NodeRunDbRow): NodeRun {
     nodeId: r.nodeId,
     iteration: r.iteration,
     status: r.status as NodeRunStatus,
+    gateDecision: (r.gateDecision as "pass" | "fail" | null) ?? null,
     error: r.error ?? null,
     startedAt: r.startedAt ?? null,
     endedAt: r.endedAt ?? null,

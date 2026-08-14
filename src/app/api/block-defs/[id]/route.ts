@@ -8,6 +8,7 @@ import {
   setBlockDefName,
   setBlockDefTray,
 } from "@/lib/db/queries";
+import { eventBus } from "@/lib/engine/events";
 
 export async function PATCH(
   req: Request,
@@ -52,7 +53,10 @@ export async function PATCH(
     setBlockDefEnabled(id, body.enabled as boolean);
   }
 
-  return NextResponse.json(getBlockDef(id));
+  const updated = getBlockDef(id);
+  // 트레이는 전역 → 열려 있는 모든 pipeline 채널에 통지(engine.md §3).
+  if (updated) eventBus.emitBlockDef("updated", id, updated);
+  return NextResponse.json(updated);
 }
 
 export async function DELETE(
@@ -64,5 +68,6 @@ export async function DELETE(
   if (!ok) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
+  eventBus.emitBlockDef("deleted", id);
   return NextResponse.json({ ok: true });
 }

@@ -123,7 +123,8 @@ html, body {
 /* ── h2: 페이지 헤딩 / 섹션 제목 — 14.5pt / 1.35 / 700 ── */
 /* DESIGN.md: pageHeading=14.5pt, topicTitle=15.5pt.
    마크다운 단일 ## 구조에서는 14.5pt로 통일(흐름 템플릿 제약).
-   topicTitle 15.5pt 구분은 .topic-title 클래스로 향후 분리 가능. */
+   topicTitle 15.5pt는 h3가 아니라 .topic-title 클래스로 향후 분리한다
+   — h3에 매핑하면 ###이 ##보다 커지는 위계 역전이 생긴다. */
 .resume h2 {
   font-size: 14.5pt;
   line-height: 1.35;
@@ -139,9 +140,12 @@ html, body {
   page-break-after: avoid;
 }
 
-/* ── h3: 소항목 제목(topic title 역할) ────────── */
+/* ── h3: 소항목 제목 ──────────────────────────── */
+/* h2(섹션, 14.5pt)의 하위이므로 반드시 h2보다 작아야 한다.
+   과거 DESIGN.md의 topicTitle 15.5pt를 그대로 h3에 매핑해 ###이 ##보다
+   크게 보이는 위계 역전이 있었다 — 12.5pt로 내려 h2 > h3 > body를 회복. */
 .resume h3 {
-  font-size: 15.5pt;
+  font-size: 12.5pt;
   line-height: 1.35;
   font-weight: 700;
   color: var(--ink);

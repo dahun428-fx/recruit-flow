@@ -110,6 +110,9 @@ export const nodeRuns = sqliteTable("node_runs", {
   iteration: integer("iteration").notNull().default(1),
   // queued / running / waiting_human / succeeded / failed / skipped
   status: text("status").notNull(),
+  // Gate 전용 라우팅 결정 — pass / fail. Gate 외 노드는 null.
+  // Gate는 판정 후 항상 succeeded로 마감하므로 status로는 복원 불가(schema.md).
+  gateDecision: text("gate_decision"),
   error: text("error"),
   startedAt: integer("started_at"),
   endedAt: integer("ended_at"),
