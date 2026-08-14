@@ -10,7 +10,7 @@
 //
 // 실행: RECRUIT_FLOW_DB_PATH=... .node22/node .../tsx scripts/smoke-chat.mts
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 
@@ -19,13 +19,14 @@ if (!DB_PATH) throw new Error("RECRUIT_FLOW_DB_PATH 필요");
 
 {
   const raw = new Database(DB_PATH);
-  const migration = readFileSync(
-    path.join(process.cwd(), "drizzle", "0000_mighty_invisible_woman.sql"),
-    "utf8",
-  );
-  for (const stmt of migration.split("--> statement-breakpoint")) {
-    const s = stmt.trim();
-    if (s) raw.exec(s);
+  // 모든 마이그레이션을 파일명 순서대로 적용(특정 파일 하드코딩 금지).
+  const migDir = path.join(process.cwd(), "drizzle");
+  for (const f of readdirSync(migDir).filter((f) => f.endsWith(".sql")).sort()) {
+    const migration = readFileSync(path.join(migDir, f), "utf8");
+    for (const stmt of migration.split("--> statement-breakpoint")) {
+      const s = stmt.trim();
+      if (s) raw.exec(s);
+    }
   }
   raw.close();
 }

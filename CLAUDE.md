@@ -72,20 +72,30 @@ v2 연기 목록(블루프린트)은 제안도 하지 않는다.
 
 ## 런타임 — Node 22 (중요)
 
-시스템 전역 Node는 23.1.0(non-LTS)이며, better-sqlite3 prebuild가
-ABI 불일치로 **세그폴트**한다. 이 머신의 nvm-windows는 새 버전 설치가
-고장나 있어, Node 22 LTS를 **프로젝트 로컬**(`.node22/`, gitignore)에
-설치해 우회했다. 전역 Node는 건드리지 않았다(다른 프로젝트 무영향).
+**불변 조건은 하나다: 모든 node/npm/npx는 Node 22로 실행한다.**
+better-sqlite3는 ABI가 맞는 Node에서만 로드되며, Node 23으로 실행하면
+DB 로드 시 **세그폴트**한다. 검증(`npm run build`, dev 서버,
+마이그레이션, e2e)도 예외 없이 Node 22.
 
-**모든 node/npm/npx 명령은 프로젝트 로컬 Node 22를 써야 한다:**
+Node 22를 어떻게 공급할지는 **머신마다 다르다.** 저장소 코드는 특정
+경로를 가정하지 않고 `process.execPath`(현재 프로세스의 Node)를 쓴다 —
+`playwright.config.ts`가 서버 런처를, 런처가 `next dev`를 같은 execPath로
+스폰하므로 어느 머신에서든 자동으로 맞는다.
 
-- Bash(Git Bash): `export PATH="/c/workspaces/recruit-flow/.node22:$PATH"`
-  를 명령 앞에 두고 `node`/`npm` 실행.
-- PowerShell: `& "C:\workspaces\recruit-flow\.node22\node.exe"` /
-  `.node22\npm.cmd` 직접 호출, 또는 `$env:PATH` 앞에 `.node22` 추가.
+| 머신 | 공급 방식 | 실행 |
+| --- | --- | --- |
+| Windows (원 개발기) | 프로젝트 로컬 `.node22/`(gitignore). nvm-windows가 고장나 우회 설치 | `.node22\npm.cmd run ...` 또는 `$env:PATH` 앞에 `.node22` 추가 |
+| macOS | volta (`node 22.x`가 이미 기본) | `npm run ...` 그대로 |
 
-전역 `node`(23)로 실행하면 DB 로드 시 세그폴트한다. 검증(`npm run
-build`, dev 서버, 마이그레이션)도 반드시 Node 22로.
+**macOS 함정 — `npm ci`가 실패한다.** volta가 물려주는 npm이 8.x면
+번들된 node-gyp 9가 Python `distutils`를 요구하는데 Python 3.12+에서
+제거되어 `ModuleNotFoundError: No module named 'distutils'`로 죽는다.
+better-sqlite3는 prebuild가 있어 **소스 빌드가 애초에 불필요**하므로,
+최신 npm으로 설치하면 그냥 통과한다:
+
+```
+npx -y npm@11 ci     # 또는 volta install npm@11 로 영구 고정
+```
 
 ## 컨벤션
 

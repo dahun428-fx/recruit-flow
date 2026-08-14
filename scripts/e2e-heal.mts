@@ -141,11 +141,14 @@ function callClaude(prompt: string): { ok: boolean; summary: string } {
       "--max-turns",
       "30",
     ],
-    // 서브 에이전트 Bash에 Node 22를 PATH 앞에 주입 → npm이 곧 node22(export 불필요).
+    // 서브 에이전트 Bash에 이 프로세스의 Node(=Node 22)를 PATH 앞에 주입
+    // → npm이 곧 Node 22로 동작(export 불필요).
     {
       input: prompt,
       shell: true,
-      env: { PATH: `${path.join(ROOT, ".node22")}${path.delimiter}${process.env.PATH ?? ""}` },
+      env: {
+        PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH ?? ""}`,
+      },
     },
   );
   let summary = r.stdout.slice(-500);
@@ -226,8 +229,10 @@ function commit(failures: Failure[], attempt: number) {
 // ── main ─────────────────────────────────────────────────────────────────────
 function main() {
   // preflight
-  if (!existsSync(path.join(ROOT, ".node22", "node.exe")))
-    fail("preflight: .node22/node.exe 없음");
+  // better-sqlite3 ABI — Node 메이저가 22여야 한다(경로가 아니라 버전을 검사).
+  const major = Number(process.versions.node.split(".")[0]);
+  if (major !== 22)
+    fail(`preflight: Node 22 필요(현재 ${process.versions.node}). 프로젝트 Node로 재실행.`);
   if (run("claude", ["--version"], { shell: true }).status !== 0)
     fail("preflight: claude CLI 없음");
   if (run("git", ["status", "--porcelain"]).stdout.trim())

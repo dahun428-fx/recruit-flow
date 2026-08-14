@@ -1,9 +1,11 @@
 import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 
-// ★ Node 22 강제: 전역 node 23은 better-sqlite3 세그폴트 → 절대경로 .node22/node.exe로
-//   서버 런처를 실행하고, 런처가 그 execPath로 next dev를 스폰한다.
-const NODE22 = path.join(process.cwd(), ".node22", "node.exe");
+// ★ Node 22 강제: better-sqlite3는 ABI가 맞는 Node에서만 로드된다(Node 23 = 세그폴트).
+//   이 config를 실행 중인 Node가 곧 프로젝트가 정한 Node이므로, 그 execPath로 서버
+//   런처를 실행하고 런처가 다시 같은 execPath로 next dev를 스폰한다.
+//   Windows(`.node22\npm.cmd run e2e`)·macOS(volta) 모두 자동으로 맞는다.
+const NODE = process.execPath;
 const PORT = process.env.E2E_PORT ?? "3200"; // 3000은 타앱 서비스워커 오염 회피
 
 export default defineConfig({
@@ -30,7 +32,7 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: `"${NODE22}" e2e/support/start-server.mjs`,
+    command: `"${NODE}" e2e/support/start-server.mjs`,
     url: `http://localhost:${PORT}`,
     reuseExistingServer: false,
     timeout: 120_000,

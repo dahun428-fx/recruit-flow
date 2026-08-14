@@ -25,15 +25,19 @@ for (const suf of ["", "-wal", "-shm"]) {
 }
 
 // 마이그레이션 적용(스모크와 동일: --> statement-breakpoint 분할 exec).
+// ★ 전부, 파일명 순서대로. 첫 파일만 적용하면 이후 마이그레이션의 컬럼이
+//   없어 "no such column"으로 죽는다.
 const migDir = path.join(root, "drizzle");
-const migFile = readdirSync(migDir)
+const migFiles = readdirSync(migDir)
   .filter((f) => f.endsWith(".sql"))
-  .sort()[0];
-const sql = readFileSync(path.join(migDir, migFile), "utf8");
+  .sort();
 const db = new Database(dbPath);
-for (const stmt of sql.split("--> statement-breakpoint")) {
-  const s = stmt.trim();
-  if (s) db.exec(s);
+for (const migFile of migFiles) {
+  const sql = readFileSync(path.join(migDir, migFile), "utf8");
+  for (const stmt of sql.split("--> statement-breakpoint")) {
+    const s = stmt.trim();
+    if (s) db.exec(s);
+  }
 }
 db.close();
 

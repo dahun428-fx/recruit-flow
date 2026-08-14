@@ -3,7 +3,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 // @live 전용 — 실 LLM(스텁 없음). 별도 포트·DB로 격리. 실행: npm run e2e:live.
 // ★ Node 22 강제(기본 config와 동일 근거).
-const NODE22 = path.join(process.cwd(), ".node22", "node.exe");
+const NODE = process.execPath;
 const PORT = process.env.E2E_LIVE_PORT ?? "3201";
 
 export default defineConfig({
@@ -22,7 +22,7 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: `"${NODE22}" e2e/support/start-server.mjs`,
+    command: `"${NODE}" e2e/support/start-server.mjs`,
     url: `http://localhost:${PORT}`,
     reuseExistingServer: false,
     timeout: 120_000,
