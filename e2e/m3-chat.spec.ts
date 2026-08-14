@@ -45,7 +45,11 @@ test("M3: '문서 등록해줘' → 문서 반영", async ({
 
   // 문서 탭에서 확인
   await page.goto("/documents");
-  await expect(page.getByText("챗봇 등록 JD")).toBeVisible({ timeout: 10_000 });
+  await expect(
+    page.locator('[data-testid^="document-list-item-"]', {
+      hasText: "챗봇 등록 JD",
+    }),
+  ).toBeVisible({ timeout: 10_000 });
 });
 
 test("M3: '작성해줘' → card_run 카드", async ({

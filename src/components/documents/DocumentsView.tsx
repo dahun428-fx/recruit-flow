@@ -89,6 +89,7 @@ export function DocumentsView() {
             key={d.id}
             className={`${styles.item} ${d.id === selected ? styles.on : ""}`}
             onClick={() => setSelected(d.id)}
+            data-testid={`document-list-item-${d.id}`}
           >
             {d.name}
           </div>

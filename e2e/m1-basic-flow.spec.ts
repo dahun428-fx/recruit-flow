@@ -1,5 +1,5 @@
 import { test, expect } from "./support/fixtures";
-import { putGraph, startRun, waitForRun, nid, createDocument } from "./support/api";
+import { putGraph, waitForRun, nid, createDocument } from "./support/api";
 
 test("M1: 문서 탭 문서 확인 → 실행 → 노드 상태 → 아티팩트 → 다운로드 → 새로고침 복원", async ({
   request,
@@ -53,12 +53,14 @@ test("M1: 문서 탭 문서 확인 → 실행 → 노드 상태 → 아티팩트
   // 8. Output 노드 클릭 → 아티팩트 탭 → 다운로드 버튼
   await page.locator(`[data-testid="node-${out}"]`).click();
   await page.locator('[data-testid="artifact-tab"]').click();
-  await expect(page.locator('[data-testid="download-html"]').first()).toBeVisible({ timeout: 10_000 });
+  const panelDownload = page.getByTestId("download-html-panel");
+  await expect(panelDownload).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId("download-html-node")).toBeVisible();
 
   // 9. 다운로드 버튼 클릭 — download 이벤트 대기
   const [download] = await Promise.all([
     page.waitForEvent("download", { timeout: 15_000 }),
-    page.locator('[data-testid="download-html"]').first().click(),
+    panelDownload.click(),
   ]);
   expect(download.suggestedFilename()).toMatch(/\.html$/);
 

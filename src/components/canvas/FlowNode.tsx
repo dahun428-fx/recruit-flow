@@ -130,7 +130,7 @@ export function FlowNode({ data, selected, id: rfId }: NodeProps) {
               e.stopPropagation();
               d.onDownload?.(d.downloadArtifactId!);
             }}
-            data-testid="download-html"
+            data-testid="download-html-node"
             data-tip="완성된 이력서를 자기완결형 HTML 1파일로 다운로드"
           >
             ⬇ HTML

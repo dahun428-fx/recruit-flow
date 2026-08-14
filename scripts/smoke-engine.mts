@@ -402,12 +402,12 @@ async function testGateMaxLoops() {
   const outNrs = nrs.filter((n) => n.nodeId === out.id);
   check(
     "gate_failed 시 Output 미실행(생성 안 됨 또는 skipped, succeeded 아님)",
-    outNrs.every((n) => n.status === "skipped") && !outNrs.some((n) => n.status === "succeeded"),
+    outNrs.length === 0 || outNrs.every((n) => n.status === "skipped"),
     `outNrs=${outNrs.map((n) => n.iteration + ":" + n.status)}`,
   );
   check(
     "gate_failed 시 Output HTML 아티팩트 없음",
-    outNrs.every((n) => !artifactOf(n.id)),
+    outNrs.length === 0 || outNrs.every((n) => !artifactOf(n.id)),
     `arts=${outNrs.map((n) => (artifactOf(n.id) ? "has" : "none"))}`,
   );
   // 유령 queued/running 잔존 없음(mount 노드 포함 — tool/skill/rule은 node_run 자체가 없어야).
@@ -456,12 +456,12 @@ async function testGateParallelFailedNoOutput() {
   // 핵심 회귀: Output은 succeeded가 아니어야(생성 안 됐거나 skipped).
   check(
     "Output succeeded 아님(생성 안 됨 또는 skipped)",
-    !outNrs.some((n) => n.status === "succeeded"),
+    outNrs.length === 0 || outNrs.every((n) => n.status === "skipped"),
     `outNrs=${outNrs.map((n) => n.iteration + ":" + n.status)}`,
   );
   check(
     "Output HTML 아티팩트 없음(불필요 산출 없음)",
-    outNrs.every((n) => !artifactOf(n.id)),
+    outNrs.length === 0 || outNrs.every((n) => !artifactOf(n.id)),
   );
   // writer는 maxLoops=1이라 재작성 없이 1회만(즉시 gate_failed).
   const writerNrs = nrs.filter((n) => n.nodeId === writer.id);
@@ -610,7 +610,12 @@ async function testCancel() {
   const status = await waitFor(res.runId, TERMINAL);
   check("run cancelled", status === "cancelled", `status=${status}`);
   const nrs = nodeRunsOf(res.runId);
-  check("Output 노드 skipped(미도달)", nrs.some((n) => n.nodeId === out.id && n.status === "skipped") || !nrs.some((n) => n.nodeId === out.id && n.status === "succeeded"));
+  const outNrs = nrs.filter((n) => n.nodeId === out.id);
+  check(
+    "Output 노드 미도달(생성 안 됨 또는 skipped)",
+    outNrs.length === 0 || outNrs.every((n) => n.status === "skipped"),
+    `outNrs=${outNrs.map((n) => n.iteration + ":" + n.status)}`,
+  );
 }
 
 // ===========================================================================
@@ -636,7 +641,11 @@ async function testRecovery() {
 
   const rr = getRunState(runningRun.id)!;
   check("running run → failed", rr.run.status === "failed", `status=${rr.run.status}`);
-  check("running run의 node_run → failed", rr.nodeRuns.every((n) => n.status !== "running"));
+  check(
+    "running run의 node_run → failed",
+    rr.nodeRuns.length > 0 && rr.nodeRuns.every((n) => n.status !== "running"),
+    `nodeRuns=${rr.nodeRuns.length}`,
+  );
   const wr = getRunState(whRun.id)!;
   check("waiting_human run 복원 유지", wr.run.status === "waiting_human", `status=${wr.run.status}`);
   check("waiting_human node_run 유지", wr.nodeRuns.find((n) => n.id === whNr.id)?.status === "waiting_human");
@@ -679,11 +688,11 @@ async function testGateDecisionPersisted() {
     gateRows[gateRows.length - 1].gateDecision === "fail",
     `maxIter=${gateRows[gateRows.length - 1].iteration}:${gateRows[gateRows.length - 1].gateDecision}`,
   );
+  const nonGateRows = nodeRunsOf(res1.runId).filter((n) => n.nodeId !== gate1.id);
   check(
     "Gate 외 노드의 gate_decision은 null",
-    nodeRunsOf(res1.runId)
-      .filter((n) => n.nodeId !== gate1.id)
-      .every((n) => n.gateDecision === null),
+    nonGateRows.length > 0 && nonGateRows.every((n) => n.gateDecision === null),
+    `rows=${nonGateRows.length}`,
   );
   // pass가 나는 경우도 기록되는지(대조군).
   const { pl: pl2, gate: gate2 } = await buildGatePipeline("smoke-gate-decision-pass", 3);
@@ -694,11 +703,11 @@ async function testGateDecisionPersisted() {
   const res2 = runner.start(pl2.id);
   if ("errors" in res2) throw new Error(JSON.stringify(res2.errors));
   await waitFor(res2.runId, TERMINAL);
+  const passGateRows = nodeRunsOf(res2.runId).filter((n) => n.nodeId === gate2.id);
   check(
     "pass Gate의 gate_decision = pass",
-    nodeRunsOf(res2.runId)
-      .filter((n) => n.nodeId === gate2.id)
-      .every((r) => r.gateDecision === "pass"),
+    passGateRows.length > 0 && passGateRows.every((r) => r.gateDecision === "pass"),
+    `rows=${passGateRows.length}`,
   );
 
   // --- (2) 재하이드레이션: Gate(fail) + Human 대기 조합 -------------------
@@ -775,12 +784,12 @@ async function testGateDecisionPersisted() {
   const outNrs = nodeRunsOf(run.id).filter((n) => n.nodeId === out.id);
   check(
     "재하이드레이션 후 pass-하류 Output 미실행(Gate 최종 결정=fail)",
-    !outNrs.some((n) => n.status === "succeeded"),
+    outNrs.length === 0 || outNrs.every((n) => n.status === "skipped"),
     `outNrs=${outNrs.map((n) => n.iteration + ":" + n.status)}`,
   );
   check(
     "재하이드레이션 후 Output HTML 아티팩트 없음",
-    outNrs.every((n) => !artifactOf(n.id)),
+    outNrs.length === 0 || outNrs.every((n) => !artifactOf(n.id)),
   );
 }
 

@@ -703,7 +703,7 @@ function Artifacts({
             <button
               className={styles.dlBtn}
               onClick={() => onDownload(artifact.id)}
-              data-testid="download-html"
+              data-testid="download-html-panel"
             >
               ⬇ HTML 다운로드
             </button>

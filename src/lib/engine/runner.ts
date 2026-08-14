@@ -656,7 +656,13 @@ class Runner {
     this.emitChatCard(
       control,
       "card_human",
-      { event: "waiting", nodeName: node.name, instruction: config.instruction, allowEdit: config.allowEdit },
+      {
+        event: "waiting",
+        nodeId: node.id,
+        nodeName: node.name,
+        instruction: config.instruction,
+        allowEdit: config.allowEdit,
+      },
       nodeRunId,
     );
 
