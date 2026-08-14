@@ -1,6 +1,7 @@
 // GET /api/pipelines/[id]/messages → ChatMessage[]  (파이프라인 채팅 스레드)
 import { NextResponse } from "next/server";
 import { getPipeline, listChatMessages } from "@/lib/db/queries";
+import { eventBus } from "@/lib/engine/events";
 
 export async function GET(
   _req: Request,
@@ -10,5 +11,8 @@ export async function GET(
   if (!getPipeline(id)) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
-  return NextResponse.json(listChatMessages(id));
+  const cursor = eventBus.getPipelineCursor(id);
+  return NextResponse.json(listChatMessages(id), {
+    headers: { "X-Stream-Cursor": String(cursor) },
+  });
 }

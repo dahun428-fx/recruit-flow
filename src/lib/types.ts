@@ -340,6 +340,8 @@ export interface NodeStatusEvent {
 export interface ArtifactDeltaEvent {
   type: "artifact_delta";
   nodeRunId: string;
+  /** 아티팩트 누적 content에서 이 chunk가 시작하는 UTF-16 offset. */
+  offset: number;
   chunk: string;
 }
 
@@ -388,3 +390,9 @@ export type SseEvent =
   | ChatDeltaEvent
   | ChatMessageEvent
   | BlockDefEvent;
+
+/**
+ * 한 SSE 채널 안에서 단조 증가하는 이벤트 번호.
+ * REST 스냅샷의 `X-Stream-Cursor`와 비교해 스냅샷 이후 이벤트만 재적용한다.
+ */
+export type SequencedSseEvent = SseEvent & { sequence: number };

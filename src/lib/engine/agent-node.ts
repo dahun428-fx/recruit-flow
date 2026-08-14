@@ -65,8 +65,9 @@ export async function runAgentNode(
   };
 
   const onDelta = (chunk: string) => {
+    const offset = buffer.length;
     buffer += chunk;
-    eventBus.emitArtifactDelta(runId, { nodeRunId, chunk });
+    eventBus.emitArtifactDelta(runId, { nodeRunId, offset, chunk });
     flush(false);
   };
 

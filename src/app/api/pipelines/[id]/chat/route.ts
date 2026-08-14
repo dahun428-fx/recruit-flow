@@ -56,7 +56,7 @@ export async function POST(
       // 4. assistant 텍스트 확정: DB 저장 + pipeline SSE 통지.
       const assistantMsg = appendChatMessage(pipelineId, "assistant", {
         text: result.text,
-      });
+      }, null, null, assistantMessageId);
       eventBus.emitChatMessage(pipelineId, assistantMsg);
     } catch (err) {
       // 챗봇 실패는 로그만(결정 C — 클라이언트는 SSE로 에러 통지 방법이 없음).
@@ -64,7 +64,7 @@ export async function POST(
       // 빈 assistant 메시지로 확정해 채팅 UI에서 실패를 인지할 수 있게 한다.
       const errMsg = appendChatMessage(pipelineId, "assistant", {
         text: "(챗봇 오류가 발생했습니다. 다시 시도해 주세요.)",
-      });
+      }, null, null, assistantMessageId);
       eventBus.emitChatMessage(pipelineId, errMsg);
     }
   })();

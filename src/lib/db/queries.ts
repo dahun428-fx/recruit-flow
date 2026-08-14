@@ -673,9 +673,10 @@ export function appendChatMessage(
   payload: unknown,
   runId?: string | null,
   nodeRunId?: string | null,
+  messageId?: string,
 ): ChatMessage {
   const row = {
-    id: nanoid(),
+    id: messageId ?? nanoid(),
     pipelineId,
     kind,
     payload,

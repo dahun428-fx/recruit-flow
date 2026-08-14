@@ -4,7 +4,7 @@
 // SSE는 통지, 진실의 원천은 DB(engine.md §3).
 import { getPipeline } from "@/lib/db/queries";
 import { eventBus } from "@/lib/engine/events";
-import type { SseEvent } from "@/lib/types";
+import type { SequencedSseEvent } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,9 +25,9 @@ export async function GET(
     start(controller) {
       let closed = false;
 
-      const send = (event: SseEvent) => {
+      const send = (event: SequencedSseEvent) => {
         if (closed) return;
-        const payload = `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
+        const payload = `id: ${event.sequence}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
         try {
           controller.enqueue(encoder.encode(payload));
         } catch {

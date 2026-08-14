@@ -9,7 +9,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import type { ChatMessage, SseEvent } from "@/lib/types";
+import type { ChatMessage, SequencedSseEvent } from "@/lib/types";
 
 export interface PipelineStreamCallbacks {
   onMessages: (msgs: ChatMessage[]) => void;
@@ -44,42 +44,59 @@ export function usePipelineStream(
 
       // 스냅샷이 적용되기 전 도착한 이벤트를 담아둔다.
       // null이 되면 "스냅샷 적용 완료 = 이제 즉시 반영" 상태.
-      let pending: Array<() => void> | null = [];
-      const apply = (fn: () => void) => {
-        if (pending) pending.push(fn);
-        else fn();
-      };
+      let pending: SequencedSseEvent[] | null = [];
 
       const es = new EventSource(`/api/pipelines/${pipelineId}/events`);
       esRef.current = es;
 
+      const applyEvent = (event: SequencedSseEvent) => {
+        if (event.type === "chat_delta") {
+          cbRef.current.onChatDelta(event.messageId, event.chunk);
+        } else if (event.type === "chat_message") {
+          cbRef.current.onChatMessage(event.message);
+        } else if (event.type === "chat_card") {
+          cbRef.current.onChatCard(event.message);
+        } else if (event.type === "block_def") {
+          // 트레이는 전역이라 payload를 신뢰하지 않고 재조회를 트리거한다.
+          cbRef.current.onBlockDefChanged?.();
+        }
+      };
+
+      const receive = (event: SequencedSseEvent) => {
+        if (pending) pending.push(event);
+        else applyEvent(event);
+      };
+
       es.addEventListener("chat_delta", (ev) => {
         const d = JSON.parse((ev as MessageEvent).data) as Extract<
-          SseEvent,
+          SequencedSseEvent,
           { type: "chat_delta" }
         >;
-        apply(() => cbRef.current.onChatDelta(d.messageId, d.chunk));
+        receive(d);
       });
 
       es.addEventListener("chat_message", (ev) => {
         const d = JSON.parse((ev as MessageEvent).data) as Extract<
-          SseEvent,
+          SequencedSseEvent,
           { type: "chat_message" }
         >;
-        apply(() => cbRef.current.onChatMessage(d.message));
+        receive(d);
       });
 
       es.addEventListener("chat_card", (ev) => {
         const d = JSON.parse((ev as MessageEvent).data) as Extract<
-          SseEvent,
+          SequencedSseEvent,
           { type: "chat_card" }
         >;
-        apply(() => cbRef.current.onChatCard(d.message));
+        receive(d);
       });
 
-      es.addEventListener("block_def", () => {
-        // 트레이는 전역이라 payload를 신뢰하지 않고 재조회를 트리거한다.
-        apply(() => cbRef.current.onBlockDefChanged?.());
+      es.addEventListener("block_def", (ev) => {
+        const d = JSON.parse((ev as MessageEvent).data) as Extract<
+          SequencedSseEvent,
+          { type: "block_def" }
+        >;
+        receive(d);
       });
 
       es.onerror = () => {
@@ -91,22 +108,51 @@ export function usePipelineStream(
         }
       };
 
-      // 구독을 연 뒤 스냅샷을 받는다. 그 사이 도착분은 pending에 쌓인다.
-      void (async () => {
+      // 서버 구독이 확정된 뒤 스냅샷을 요청해야 두 HTTP 연결 사이의
+      // 미구독 구간이 생기지 않는다.
+      async function applySnapshot() {
         let msgs: ChatMessage[] | null = null;
+        let cursor = 0;
         try {
           const res = await fetch(`/api/pipelines/${pipelineId}/messages`);
-          if (res.ok) msgs = (await res.json()) as ChatMessage[];
+          if (res.ok) {
+            const headerCursor = Number(
+              res.headers.get("X-Stream-Cursor") ?? "0",
+            );
+            cursor = Number.isSafeInteger(headerCursor) ? headerCursor : 0;
+            msgs = (await res.json()) as ChatMessage[];
+          }
         } catch {
           // 네트워크 오류 — 스냅샷 없이 버퍼만 흘려보낸다(다음 재연결에서 복구).
         }
         if (cancelled || esRef.current !== es) return;
         if (msgs) cbRef.current.onMessages(msgs);
-        // 스냅샷 → 버퍼 순으로 적용. 이후 도착분은 즉시 반영.
+        const snapshotIds = new Set((msgs ?? []).map((message) => message.id));
+        // cursor 이하의 영속 메시지는 스냅샷이 이미 포함한다. chat_delta도
+        // 확정 메시지와 같은 id면 stale 스트리밍이므로 버린다.
         const buffered = pending ?? [];
         pending = null;
-        for (const fn of buffered) fn();
-      })();
+        for (const event of buffered) {
+          if (event.type === "block_def") {
+            applyEvent(event);
+          } else if (
+            event.type === "chat_delta" &&
+            event.sequence > cursor &&
+            !snapshotIds.has(event.messageId)
+          ) {
+            applyEvent(event);
+          } else if (event.sequence > cursor) {
+            applyEvent(event);
+          }
+        }
+      }
+
+      let snapshotStarted = false;
+      es.onopen = () => {
+        if (snapshotStarted) return;
+        snapshotStarted = true;
+        void applySnapshot();
+      };
     }
 
     connect();

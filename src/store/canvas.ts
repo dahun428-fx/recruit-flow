@@ -3,6 +3,7 @@
 "use client";
 
 import { create } from "zustand";
+import { mergeTextDelta } from "@/lib/stream-reconcile";
 import type {
   Artifact,
   EdgeRow,
@@ -60,7 +61,8 @@ interface CanvasState {
   setRunStatus: (status: RunStatus, progress: { done: number; total: number }) => void;
   setNodeStatus: (nodeId: string, nodeRunId: string, status: NodeRunStatus) => void;
   upsertArtifact: (artifact: Artifact) => void;
-  appendArtifactDelta: (nodeRunId: string, chunk: string) => void;
+  /** offset 델타를 멱등 병합. true면 앞선 chunk 유실(gap). */
+  appendArtifactDelta: (nodeRunId: string, offset: number, chunk: string) => boolean;
   clearRun: () => void;
 }
 
@@ -141,17 +143,24 @@ export const useCanvasStore = create<CanvasState>((set) => ({
       };
     }),
 
-  appendArtifactDelta: (nodeRunId, chunk) =>
+  appendArtifactDelta: (nodeRunId, offset, chunk) => {
+    let hasGap = false;
     set((s) => {
-      if (!s.run) return {};
+      if (!s.run) {
+        hasGap = offset !== 0;
+        return {};
+      }
       const prev = s.run.artifacts[nodeRunId];
+      const merged = mergeTextDelta(prev?.content ?? "", offset, chunk);
+      hasGap = merged.hasGap;
+      if (hasGap || merged.content === prev?.content) return {};
       const next: Artifact = prev
-        ? { ...prev, content: prev.content + chunk }
+        ? { ...prev, content: merged.content }
         : {
             id: `stream-${nodeRunId}`,
             nodeRunId,
             format: "markdown",
-            content: chunk,
+            content: merged.content,
             meta: null,
           };
       return {
@@ -160,7 +169,9 @@ export const useCanvasStore = create<CanvasState>((set) => ({
           artifacts: { ...s.run.artifacts, [nodeRunId]: next },
         },
       };
-    }),
+    });
+    return hasGap;
+  },
 
   clearRun: () => set({ run: null }),
 }));

@@ -10,10 +10,11 @@ import type {
   ChatMessageKind,
   NodeStatusEvent,
   RunStatusEvent,
+  SequencedSseEvent,
   SseEvent,
 } from "../types";
 
-type Subscriber = (event: SseEvent) => void;
+type Subscriber = (event: SequencedSseEvent) => void;
 
 class RunEventBus {
   /** runId → subscriber 집합(캔버스·아티팩트 SSE — run 스코프). */
@@ -24,6 +25,8 @@ class RunEventBus {
    * 이 채널로 흐른다(engine.md §3 M3 채널 구조).
    */
   private pipelineSubscribers = new Map<string, Set<Subscriber>>();
+  private runSequences = new Map<string, number>();
+  private pipelineSequences = new Map<string, number>();
 
   subscribe(runId: string, fn: Subscriber): () => void {
     let set = this.subscribers.get(runId);
@@ -57,11 +60,13 @@ class RunEventBus {
   }
 
   private emit(runId: string, event: SseEvent): void {
+    const sequence = (this.runSequences.get(runId) ?? 0) + 1;
+    this.runSequences.set(runId, sequence);
     const set = this.subscribers.get(runId);
     if (!set) return;
     for (const fn of set) {
       try {
-        fn(event);
+        fn({ ...event, sequence });
       } catch {
         // 개별 구독자 오류는 발행을 막지 않는다.
       }
@@ -70,11 +75,13 @@ class RunEventBus {
 
   /** 파이프라인 채널 발행(M3). 구독자 오류는 격리. */
   emitToPipeline(pipelineId: string, event: SseEvent): void {
+    const sequence = (this.pipelineSequences.get(pipelineId) ?? 0) + 1;
+    this.pipelineSequences.set(pipelineId, sequence);
     const set = this.pipelineSubscribers.get(pipelineId);
     if (!set) return;
     for (const fn of set) {
       try {
-        fn(event);
+        fn({ ...event, sequence });
       } catch {
         // 개별 구독자 오류는 발행을 막지 않는다.
       }
@@ -139,10 +146,12 @@ class RunEventBus {
    * 특정 채널을 고를 수 없으므로 브로드캐스트가 유일하게 옳은 라우팅이다.
    */
   emitToAllPipelines(event: SseEvent): void {
-    for (const set of this.pipelineSubscribers.values()) {
+    for (const [pipelineId, set] of this.pipelineSubscribers) {
+      const sequence = (this.pipelineSequences.get(pipelineId) ?? 0) + 1;
+      this.pipelineSequences.set(pipelineId, sequence);
       for (const fn of set) {
         try {
-          fn(event);
+          fn({ ...event, sequence });
         } catch {
           // 개별 구독자 오류는 발행을 막지 않는다.
         }
@@ -167,6 +176,14 @@ class RunEventBus {
   /** 파이프라인 구독자 존재 여부(디버그·테스트용). */
   hasPipelineSubscribers(pipelineId: string): boolean {
     return (this.pipelineSubscribers.get(pipelineId)?.size ?? 0) > 0;
+  }
+
+  getRunCursor(runId: string): number {
+    return this.runSequences.get(runId) ?? 0;
+  }
+
+  getPipelineCursor(pipelineId: string): number {
+    return this.pipelineSequences.get(pipelineId) ?? 0;
   }
 }
 

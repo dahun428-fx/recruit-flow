@@ -3,7 +3,7 @@
 // 이벤트 이름 = payload.type (run_status/node_status/artifact_delta).
 import { getRun } from "@/lib/db/queries";
 import { eventBus } from "@/lib/engine/events";
-import type { SseEvent } from "@/lib/types";
+import type { SequencedSseEvent } from "@/lib/types";
 
 // DB·러너 싱글턴을 쓰므로 Node 런타임 강제(엣지 아님).
 export const runtime = "nodejs";
@@ -24,9 +24,9 @@ export async function GET(
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let closed = false;
-      const send = (event: SseEvent) => {
+      const send = (event: SequencedSseEvent) => {
         if (closed) return;
-        const payload = `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
+        const payload = `id: ${event.sequence}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
         try {
           controller.enqueue(encoder.encode(payload));
         } catch {
@@ -61,6 +61,9 @@ export async function GET(
           cleanup();
         }
       }, 15000);
+
+      // EventSource.close()/탭 종료 시 즉시 구독 해제한다.
+      _req.signal?.addEventListener("abort", cleanup);
 
       // 종결 상태면 곧바로 정리(구독자는 재접속 시 REST로 최종 상태 확인).
       // waiting_human은 재개(approve/answer) 대기라 스트림 유지.
