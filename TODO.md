@@ -8,6 +8,12 @@
   e2e **18/18** · 엔진 스모크 **82/82** · 챗봇 스모크 **38/38**.
 - P1·P2·P3 전 항목 처리 완료. 아래 "처리 내역" 참조.
 
+> **주의 — 이 초록이 보증하는 범위는 좁다.**
+> e2e 18/18은 전부 **결정론적 스텁 모드**다. 실 LLM으로 이력서를 뽑은
+> 적이 이 체크아웃에는 없고(`data/` 없음, 임포터·`@live` 미실행),
+> 위 처리 내역 중 5건은 **그 항목만 겨냥해 실패하는 테스트가 없다.**
+> 남은 검증 부채와 실행 순서는 **[specs/completion-plan.md](specs/completion-plan.md)** 참조.
+
 ## 처리 내역 (2026-08-14)
 
 ### P1 — 동작 결함 및 복구 안정성
@@ -84,9 +90,24 @@
 - [ ] 부분 재실행 시 재사용 출처 선택 UI (`specs/ui.md:253`).
 - [ ] portfolio/headhunter 에이전트군의 앱 내 정식 이관·활성화 범위 결정.
 
+## 다음 할 일 — 검증 부채 청산
+
+상세 계획: **[specs/completion-plan.md](specs/completion-plan.md)**
+
+- [ ] **A. 실 LLM 검증** (최우선 — 블루프린트 M2 완료 기준 그 자체)
+  - [ ] A1. 임포터 실행해 실 DB 생성 (`--source ~/Documents/workspaces9/my-recruit`)
+  - [ ] A2. `@live` 카나리아 2건 (`npm run e2e:live` — 구독 쿼터 소비)
+  - [ ] A3. canonical 파이프라인 실 조립·실행 → 이력서 HTML 산출
+- [ ] **B. 미증명 5건에 대조군 검증된 테스트 추가**
+  - [ ] B1. `PUT /graph` 400 (커버리지 0) — [ ] B2. Human 승인 버튼 UI (커버리지 0)
+  - [ ] B3. 트레이 브로드캐스트 — [ ] B4. SSE 끊김 복원 — [ ] B5. h3 위계 시각 확인
+- [ ] **C. 테스트 우회 패턴 감사** (`reload()`·`.first()`·API 폴링 전용 단언)
+
 ## 남은 관찰 사항 (비블로킹)
 
 - `download-html` testid가 FlowNode·SidePanel 양쪽에 존재 — `.first()`를
   쓰는 스펙은 한쪽만 고장나도 통과한다(testid 유일화가 이상적).
 - `topicTitle` 15.5pt는 h3가 아니라 별도 `.topic-title` 클래스로
   분리해야 한다(현재는 위계 보존을 우선해 h3를 12.5pt로 둠).
+- `npm run lint` 깨짐 — `next lint`가 Next 16에서 제거됨. `eslint` 직접
+  호출로 교체 필요(이번 작업과 무관한 기존 상태).
