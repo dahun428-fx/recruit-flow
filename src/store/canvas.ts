@@ -6,7 +6,9 @@ import { create } from "zustand";
 import { mergeTextDelta } from "@/lib/stream-reconcile";
 import type {
   Artifact,
+  AgentConfig,
   EdgeRow,
+  MountRef,
   NodeConfig,
   NodeRow,
   NodeRunStatus,
@@ -47,7 +49,9 @@ interface CanvasState {
   setEdges: (edges: EdgeRow[]) => void;
   addNode: (node: NodeRow) => void;
   moveNode: (id: string, x: number, y: number) => void;
-  updateNodeConfig: (id: string, config: NodeConfig) => void;
+  updateNodeConfig: (id: string, config: Partial<NodeConfig>) => void;
+  /** Agent 노드의 config.mounts 배열 갱신 (장착 칩 추가/제거). */
+  updateAgentMounts: (agentNodeId: string, mounts: MountRef[]) => void;
   renameNode: (id: string, name: string) => void;
   removeNode: (id: string) => void;
   addEdge: (edge: EdgeRow) => void;
@@ -91,9 +95,18 @@ export const useCanvasStore = create<CanvasState>((set) => ({
       ),
     })),
 
-  updateNodeConfig: (id, config) =>
+  updateNodeConfig: (id, config: Partial<NodeConfig>) =>
     set((s) => ({
       nodes: s.nodes.map((n) => (n.id === id ? { ...n, config } : n)),
+    })),
+
+  updateAgentMounts: (agentNodeId, mounts) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) => {
+        if (n.id !== agentNodeId || n.type !== "agent") return n;
+        const prevConfig = n.config as Partial<AgentConfig>;
+        return { ...n, config: { ...prevConfig, mounts } };
+      }),
     })),
 
   renameNode: (id, name) =>

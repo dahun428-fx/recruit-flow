@@ -15,6 +15,13 @@
       "when": 1786685834362,
       "tag": "0001_whole_shard",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1786685834363,
+      "tag": "0002_nodes_block_def_id",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,258 @@
+/* 탭 편집기 — 중앙 영역 */
+.editor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+/* 탭 바 */
+.tabBar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 4px 8px 0;
+  gap: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  border-radius: 7px 7px 0 0;
+  border: 1px solid transparent;
+  border-bottom: none;
+  background: transparent;
+  transition: background 0.1s;
+}
+.tab:hover {
+  background: #f2f4f8;
+}
+.tab.active {
+  background: var(--bg);
+  border-color: var(--border);
+  border-bottom-color: var(--bg);
+  position: relative;
+  bottom: -1px;
+}
+
+.tabLabel {
+  border: 0;
+  background: transparent;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.active .tabLabel {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.tabClose {
+  border: 0;
+  background: transparent;
+  padding: 2px 7px 2px 2px;
+  font-size: 14px;
+  color: var(--text-faint);
+  cursor: pointer;
+  line-height: 1;
+  border-radius: 4px;
+}
+.tabClose:hover {
+  background: #e2e6ec;
+  color: var(--text);
+}
+
+/* 탭 콘텐츠 영역 */
+.content {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* 파이프라인 없을 때 */
+.noPipeline {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+/* Wave 2 플레이스홀더 */
+.wave2 {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wave2Inner {
+  text-align: center;
+}
+.wave2Title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+.wave2Msg {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* ── 문서 편집기 ── */
+.loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+}
+
+.docEditor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+}
+
+.docHead {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.docHead b {
+  font-size: 13px;
+  color: var(--text);
+}
+.saved {
+  font-size: 11.5px;
+  color: var(--c-output);
+}
+.saveBtn {
+  margin-left: auto;
+  border: 0;
+  background: var(--c-agent);
+  color: #fff;
+  border-radius: 7px;
+  padding: 5px 16px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.saveBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.docBody {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.docTextarea {
+  flex: 1;
+  border: none;
+  outline: none;
+  padding: 14px 16px;
+  font: 12.5px/1.7 Consolas, monospace;
+  color: #38404d;
+  resize: none;
+  background: var(--surface);
+}
+
+.docVersions {
+  width: 200px;
+  flex: none;
+  border-left: 1px solid var(--border);
+  padding: 12px;
+  overflow-y: auto;
+}
+.versionsHead {
+  font-size: 11px;
+  color: #7a8494;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.ver {
+  border-left: 2px solid var(--border);
+  padding: 2px 0 10px 10px;
+  font-size: 11.5px;
+  color: #7a8494;
+}
+.ver b {
+  color: #38404d;
+  display: block;
+}
+.verNote {
+  font-size: 11px;
+  color: var(--text-faint);
+  line-height: 1.5;
+}
+
+/* 블록 정의 편집기 모드 토글 */
+.modeToggle {
+  display: flex;
+  gap: 2px;
+  background: var(--border);
+  border-radius: 7px;
+  padding: 2px;
+}
+.modeBtn {
+  border: 0;
+  background: transparent;
+  border-radius: 5px;
+  padding: 3px 12px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.modeBtnActive {
+  background: var(--bg);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+/* M4: 블록 정의 탭 추가 스타일 */
+.defType {
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--c-mount);
+  color: #fff;
+  border-radius: 4px;
+  padding: 1px 7px;
+  margin-left: 6px;
+}
+
+.defError {
+  font-size: 11.5px;
+  color: #d1372e;
+  margin-left: 8px;
+}
+
+.defSection {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}

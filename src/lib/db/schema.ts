@@ -36,7 +36,13 @@ export const nodes = sqliteTable("nodes", {
   name: text("name").notNull(),
   positionX: real("position_x").notNull(),
   positionY: real("position_y").notNull(),
-  // 타입별 속성(nodes.md) — JSON
+  // M4 결정 1·4-A: 참조+오버라이드 시맨틱.
+  // null=맨손 노드(config 완결). non-null=정의 참조(config는 오버라이드 필드만).
+  // 정의 삭제 시 SET NULL — 노드는 맨손으로 남는다.
+  blockDefId: text("block_def_id").references(() => blockDefs.id, {
+    onDelete: "set null",
+  }),
+  // 타입별 속성(nodes.md) — JSON. blockDefId 있으면 오버라이드 필드만.
   config: text("config", { mode: "json" }).notNull(),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),

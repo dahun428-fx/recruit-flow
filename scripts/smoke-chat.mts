@@ -36,6 +36,7 @@ const {
   saveGraph,
   listBlockDefs,
   listChatMessages,
+  listDocuments,
   getGraph,
 } = await import("../src/lib/db/queries");
 const { eventBus } = await import("../src/lib/engine/events");
@@ -191,17 +192,74 @@ async function testTriggerRun() {
 }
 
 // ===========================================================================
-// (4) 결정 5 회귀: 쓰기 tool이 add/register/trigger 외로 안 늘었는지
+// (2b) edit_document: 0/1/2+ 매치 분기 + register_document/edit document_changed SSE
+// ===========================================================================
+async function testEditDocument() {
+  console.log("\n[2b] edit_document: 0/1/2+ 매치 + document_changed SSE");
+  const pl = createPipeline("smoke-chat-editdoc");
+  const received: SseEvent[] = [];
+  const unsub = eventBus.subscribePipeline(pl.id, (ev) => received.push(ev));
+
+  const { mcpServers } = buildChatbotMcp(pl.id);
+  const registerDoc = findTool(mcpServers, "register_document")!;
+  const editDoc = findTool(mcpServers, "edit_document");
+  check("edit_document tool 존재", !!editDoc);
+
+  // register_document(생성) → created document_changed 발행.
+  await registerDoc.handler(
+    { name: "가이드", content: "제목\n\n원문 문단 하나. 그리고 유일 토큰 ALPHA.\n\n반복 X 반복 X" },
+    {},
+  );
+  check("register_document created document_changed 발행",
+    received.some((e) => e.type === "document_changed" && (e as { action: string }).action === "created"),
+    received.map((e) => e.type).join(","));
+
+  const docBefore = listDocuments().find((d) => d.name === "가이드")!;
+
+  // (0곳) 없는 문자열 → 찾을 수 없음 에러.
+  received.length = 0;
+  const zero = await editDoc!.handler({ name: "가이드", old_string: "존재하지않는문자열", new_string: "X" }, {});
+  check("0곳 매치 → 찾을 수 없음", /찾을 수 없습니다/.test(zero.content[0].text), zero.content[0].text.slice(0, 80));
+  check("0곳 매치 → 버전 증가 없음", listDocuments().find((d) => d.name === "가이드")!.currentVersion === docBefore.currentVersion);
+  check("0곳 매치 → document_changed 미발행", !received.some((e) => e.type === "document_changed"));
+
+  // (2+곳) 여러 곳 일치 → 더 긴 문맥 요구 에러.
+  received.length = 0;
+  const many = await editDoc!.handler({ name: "가이드", old_string: "반복 X", new_string: "Y" }, {});
+  check("2+곳 매치 → 여러 곳 일치 에러", /여러 곳|일치합니다/.test(many.content[0].text), many.content[0].text.slice(0, 80));
+  check("2+곳 매치 → 버전 증가 없음", listDocuments().find((d) => d.name === "가이드")!.currentVersion === docBefore.currentVersion);
+
+  // (정확히 1곳) 성공 → 치환 + 새 버전 + updated document_changed.
+  received.length = 0;
+  const one = await editDoc!.handler({ name: "가이드", old_string: "유일 토큰 ALPHA", new_string: "유일 토큰 BETA" }, {});
+  check("1곳 매치 → 편집 성공 응답", /편집했습니다|치환/.test(one.content[0].text), one.content[0].text.slice(0, 80));
+  const { getDocument } = await import("../src/lib/db/queries");
+  const reloaded = getDocument(docBefore.id)!;
+  check("1곳 매치 → 본문 치환됨", reloaded.content.includes("BETA") && !reloaded.content.includes("ALPHA"), reloaded.content);
+  check("1곳 매치 → 버전 증가", reloaded.currentVersion === docBefore.currentVersion + 1, `v=${reloaded.currentVersion}`);
+  check("1곳 매치 → updated document_changed 발행(version 포함)",
+    received.some((e) => e.type === "document_changed" && (e as { action: string; version?: number }).action === "updated" && (e as { version?: number }).version === reloaded.currentVersion),
+    received.map((e) => e.type).join(","));
+
+  // 없는 문서 → 문서 없음 에러.
+  const missing = await editDoc!.handler({ name: "없는문서", old_string: "a", new_string: "b" }, {});
+  check("없는 문서 → 찾을 수 없음", /찾을 수 없습니다/.test(missing.content[0].text));
+
+  unsub();
+}
+
+// ===========================================================================
+// (4) 결정 5 회귀: 쓰기 tool이 add/register/edit/trigger 외로 안 늘었는지
 // ===========================================================================
 async function testDecision5() {
   console.log("\n[4] 결정 5 회귀: 배선/삭제/수정 tool 부재");
   const pl = createPipeline("smoke-chat-d5");
   const { allowedTools, mcpServers } = buildChatbotMcp(pl.id);
 
-  // allowedTools 정확히 7종.
-  check("allowedTools 정확히 7종", allowedTools.length === 7, `count=${allowedTools.length}: ${allowedTools.join(",")}`);
+  // allowedTools 정확히 8종.
+  check("allowedTools 정확히 8종", allowedTools.length === 8, `count=${allowedTools.length}: ${allowedTools.join(",")}`);
   const expected = new Set(CHATBOT_TOOL_NAMES.map((n) => `mcp__${CHATBOT_MCP_SERVER_NAME}__${n}`));
-  check("allowedTools = 카탈로그 7종과 정확히 일치", allowedTools.length === expected.size && allowedTools.every((t) => expected.has(t)));
+  check("allowedTools = 카탈로그 8종과 정확히 일치", allowedTools.length === expected.size && allowedTools.every((t) => expected.has(t)));
 
   // 금지 tool 이름이 어디에도 없어야(allowedTools + 실제 MCP tool 목록).
   const forbidden = ["add_edge", "wire", "connect", "delete_node", "update_node", "move_node", "delete_edge", "delete", "update"];
@@ -291,6 +349,7 @@ async function hasAnyRun(pipelineId: string): Promise<boolean> {
 async function main() {
   await testPipelineChannel();
   await testAddBlock();
+  await testEditDocument();
   await testDecision5();
   await testTriggerRun();
   await testRunChatOrchestration();

@@ -11,6 +11,8 @@ export default defineConfig([
       "src/components/documents/DocumentsView.tsx",
       "src/components/panel/SidePanel.tsx",
       "src/hooks/usePanelWidth.ts",
+      "src/components/shell/FileExplorer.tsx",
+      "src/components/shell/TabEditor.tsx",
     ],
     // Next 16 exposes newer React compiler-oriented hook rules. The current
     // components deliberately hydrate local UI state in effects. Retain the

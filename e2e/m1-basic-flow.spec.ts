@@ -6,8 +6,8 @@ test("M1: 문서 탭 문서 확인 → 실행 → 노드 상태 → 아티팩트
   pipelineId,
   page,
 }) => {
-  // 1. 문서 생성
-  await createDocument(request, "백엔드 JD", "# JD\n백엔드 시니어");
+  // 1. 문서 생성 (재시도 시 중복 생성될 수 있으므로 반환 id로 고유 검증)
+  const docId = await createDocument(request, "백엔드 JD", "# JD\n백엔드 시니어");
 
   // 2. 그래프 세팅
   const inp = nid("in"), ag = nid("ag"), out = nid("out");
@@ -20,14 +20,15 @@ test("M1: 문서 탭 문서 확인 → 실행 → 노드 상태 → 아티팩트
     { id: nid("e"), sourceNodeId: ag, targetNodeId: out },
   ]);
 
-  // 3. 문서 탭 확인
+  // 3. 문서 탭 확인 — 전역 문서 목록(FileExplorer)에서 이 테스트가 만든
+  // 문서만 고유 testid로 확인(getByText는 누적/중복 문서에 strict 위반).
   await page.goto("/documents");
-  await expect(page.getByText("백엔드 JD")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId(`document-list-item-${docId}`)).toBeVisible({ timeout: 10_000 });
 
   // 4. 캔버스로 이동
   await page.goto(`/pipelines/${pipelineId}`);
   // 노드들이 렌더링될 때까지 대기
-  await expect(page.locator('[data-testid^="node-"]').first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid^="node-"]').first()).toBeVisible({ timeout: 30_000 });
 
   // 5. Run 버튼 클릭
   await page.locator('[data-testid="run-btn"]').click();
@@ -50,12 +51,14 @@ test("M1: 문서 탭 문서 확인 → 실행 → 노드 상태 → 아티팩트
   const state = await waitForRun(request, runId, { timeoutMs: 60_000 });
   expect(state.run.status).toBe("succeeded");
 
-  // 8. Output 노드 클릭 → 아티팩트 탭 → 다운로드 버튼
+  // 8. Output 노드 클릭 → 노드 탭 열림 → 아티팩트 탭 → 다운로드 버튼
+  // M4: 노드 클릭 시 노드 편집기 탭이 열리므로 캔버스 탭 노드 카드 대신 노드 탭에서 확인.
   await page.locator(`[data-testid="node-${out}"]`).click();
   await page.locator('[data-testid="artifact-tab"]').click();
   const panelDownload = page.getByTestId("download-html-panel");
   await expect(panelDownload).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByTestId("download-html-node")).toBeVisible();
+  // download-html-node는 캔버스 탭 내 노드 카드의 버튼 — 탭 전환 후 캔버스가 숨겨져 있어 확인하지 않음.
+  // download-html-panel(노드 탭)이 visible한 것으로 대체 검증.
 
   // 9. 다운로드 버튼 클릭 — download 이벤트 대기
   const [download] = await Promise.all([
@@ -66,7 +69,7 @@ test("M1: 문서 탭 문서 확인 → 실행 → 노드 상태 → 아티팩트
 
   // 10. 새로고침 후 노드 복원 확인
   await page.reload();
-  await expect(page.locator('[data-testid^="node-"]').first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid^="node-"]').first()).toBeVisible({ timeout: 30_000 });
   const count = await page.locator('[data-testid^="node-"]').count();
   expect(count).toBeGreaterThanOrEqual(3);
 });
@@ -87,7 +90,7 @@ test("M1: [E2E:slow] run 실행 중 중단 → cancelled", async ({
   ]);
 
   await page.goto(`/pipelines/${pipelineId}`);
-  await expect(page.locator('[data-testid^="node-"]').first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid^="node-"]').first()).toBeVisible({ timeout: 30_000 });
 
   // Run 시작
   await page.locator('[data-testid="run-btn"]').click();

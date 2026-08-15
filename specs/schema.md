@@ -4,14 +4,21 @@
 상위 문서: [recruit-flow-blueprint.md](../recruit-flow-blueprint.md) ·
 [nodes.md](nodes.md). id는 전부 텍스트(nanoid), 시각은 unixepoch ms.
 
-## 설계 원칙 (Q16)
+M4 재설계(2026-08-15): 참조+오버라이드 시맨틱(결정 1), 장착 칩 방식(결정 3), enabled 토글 폐지(결정 5) 반영.
+
+## 설계 원칙 (Q16, M4 갱신)
 
 1. **현재 그래프 = 정규화 행** (`nodes`/`edges`) — 팔레트·부분
    재실행·검증이 노드 단위 조회를 요구.
 2. **run 스냅샷 = JSON 블롭** (`runs.graph_snapshot`) — 스냅샷은
    불변이고 통짜로만 읽으므로 정규화는 과잉(결정 9b).
-3. **`block_defs`와 `nodes`는 FK 없이 완전 분리** — 템플릿 복사
-   시맨틱(ui.md Q7). 드래그 시 config를 통째 복사, 역승격도 복사.
+3. **`nodes`는 `block_defs`를 참조(block_def_id nullable) + 필드별
+   오버라이드** — `block_def_id=null`이면 `config`가 완결, non-null이면
+   `config`는 오버라이드 필드만이고 실효 config = `block_def.config ⊕ config`.
+   정의 config 수정은 참조하는 모든 노드에 반영(SSE). `node.name`은 항상
+   인스턴스 소유(Gate 조건식 참조 안정성). run 스냅샷은 참조를 resolve한
+   완결 config를 저장하므로 과거 run 불변.
+   마이그레이션: `nodes` 테이블에 `block_def_id text nullable` 컬럼 추가 필요.
 
 ## 테이블
 
@@ -30,11 +37,14 @@
 | --- | --- | --- |
 | id | text PK | |
 | pipeline_id | text FK | |
-| type | text | agent/input/output/gate/human/skill/rule/tool |
-| name | text | |
+| type | text | agent/input/output/gate/human |
+| name | text | 항상 인스턴스 소유 — 정의 이름 변경이 이 값을 끌고 가지 않음 |
+| block_def_id | text nullable | FK → block_defs.id. null이면 독립 노드, non-null이면 참조 노드 |
 | position_x / position_y | real | React Flow 좌표 |
-| config | text (JSON) | 타입별 속성(nodes.md). Agent: 역할·출력형식·모델·스키마·갭모드 / Input: document_id·인라인 / Gate: 조건식·최대루프 / … |
+| config | text (JSON) | block_def_id=null이면 완결 config. non-null이면 오버라이드 필드만(실효 config는 block_def.config ⊕ 이 값). Agent: 역할·출력형식·모델·스키마·갭모드·mounts / Input: document_id·인라인 / Gate: 조건식·최대루프 / … |
 | created_at / updated_at | integer | |
+
+**타입 범위**: `agent/input/output/gate/human`. skill/rule/tool은 캔버스 독립 노드가 아니라 `block_defs` 팔레트 정의로만 존재하며 Agent config.mounts에 참조로 저장된다(결정 3, M4 재설계).
 
 ### edges
 
@@ -43,20 +53,22 @@
 | id | text PK | |
 | pipeline_id | text FK | |
 | source_node_id / target_node_id | text FK | |
-| kind | text | `flow`(실선) / `mount`(점선) — 배선 제약은 앱 검증 |
+| kind | text | `flow`(실선) — 배선 제약은 앱 검증 |
 | source_handle | text nullable | Gate만 `pass`/`fail` |
 | input_order | integer | Q11 입력 순번(엣지 클릭으로 조정) |
+
+**`mount` 엣지 폐기(M4)**: skill/rule/tool을 잇던 점선 `mount` 엣지는 M4 재설계로 폐기됐다. 장착은 Agent `config.mounts[]`에 `{blockDefId, override?}` 배열로 저장한다. 기존 DB에 `kind='mount'` 행이 있으면 마이그레이션 시 제거.
 
 ### block_defs — 팔레트 하위 항목(저장된 정의)
 
 | 컬럼 | 타입 | 비고 |
 | --- | --- | --- |
 | id | text PK | |
-| type | text | 팔레트 트리의 소속 타입 |
+| type | text | 팔레트 트리의 소속 타입(agent/input/output/gate/human/skill/rule/tool) |
 | name | text | |
 | description | text | 팝오버·툴팁 문구 |
-| config | text (JSON) | nodes.config와 동일 형태 |
-| enabled | integer(bool) | 하위 항목별 활성/비활성(Q10-B) |
+| config | text (JSON) | nodes.config와 동일 형태. skill/rule: 이름+내용(마크다운). tool: 카탈로그 선택 |
+| enabled | integer(bool) | **M4부터 미사용**: UI·러너·팔레트 필터에서 참조하지 않음. 마이그레이션 회피를 위해 컬럼은 유지, v2에서 정리. |
 | origin | text | `human` / `chatbot` / `import` |
 | tray | integer(bool) | true = 새 블록 트레이 대기(챗봇 add, 미승인). 캔버스 드래그 승인 시 false로 |
 | created_at | integer | |
@@ -70,7 +82,7 @@
 | id | text PK | |
 | pipeline_id | text FK | |
 | status | text | `running` / `waiting_human` / `succeeded` / `failed` / `gate_failed` / `cancelled` |
-| graph_snapshot | text (JSON) | 시작 시 nodes+edges 전체 복사 |
+| graph_snapshot | text (JSON) | 시작 시 nodes+edges 전체 복사. 참조 resolve 완결 config 포함(M4) |
 | upstream_run_id | text nullable | 부분 재실행 시 아티팩트 재사용 출처(직전 완료 run) |
 | started_at / ended_at | integer | |
 
@@ -122,6 +134,7 @@
 
 문서 본문은 versions에만 존재(현재 본문 = current_version 행).
 에이전트 접근은 `get_document(id)`/`search_documents` tool(결정 7).
+챗봇 `edit_document` tool로 수정 시 매 성공마다 새 버전 생성(author=llm).
 
 ### chat_messages
 
@@ -141,3 +154,6 @@
   같이 만들어두되 미사용)
 - **M2**: block_defs 사용(임포터), chat_messages의 card_run/card_human.
 - **M3**: chat_messages 전체.
+- **M4**: nodes.block_def_id 컬럼 추가 마이그레이션, edges.kind='mount' 행
+  폐기, block_defs.enabled 미사용 전환, Agent config.mounts 저장 방식
+  확정. document_versions에 llm author 경로(edit_document) 공식화.

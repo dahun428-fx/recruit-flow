@@ -18,6 +18,8 @@ export interface PipelineStreamCallbacks {
   onChatCard: (msg: ChatMessage) => void;
   /** 트레이(block_defs) 변경 통지 — 전역 브로드캐스트(engine.md §3) */
   onBlockDefChanged?: () => void;
+  /** 문서 변경 통지 — 전역 브로드캐스트(M4 결정 4-G) */
+  onDocumentChanged?: (documentId: string) => void;
 }
 
 /**
@@ -59,6 +61,9 @@ export function usePipelineStream(
         } else if (event.type === "block_def") {
           // 트레이는 전역이라 payload를 신뢰하지 않고 재조회를 트리거한다.
           cbRef.current.onBlockDefChanged?.();
+        } else if (event.type === "document_changed") {
+          // 문서 변경: documentId를 전달해 탐색기·열린 탭이 재조회하도록 브로드캐스트.
+          cbRef.current.onDocumentChanged?.(event.documentId);
         }
       };
 
@@ -99,6 +104,14 @@ export function usePipelineStream(
         receive(d);
       });
 
+      es.addEventListener("document_changed", (ev) => {
+        const d = JSON.parse((ev as MessageEvent).data) as Extract<
+          SequencedSseEvent,
+          { type: "document_changed" }
+        >;
+        receive(d);
+      });
+
       es.onerror = () => {
         es.close();
         esRef.current = null;
@@ -133,7 +146,8 @@ export function usePipelineStream(
         const buffered = pending ?? [];
         pending = null;
         for (const event of buffered) {
-          if (event.type === "block_def") {
+          if (event.type === "block_def" || event.type === "document_changed") {
+            // 전역 이벤트 — sequence 무관, 항상 적용(block_def 선례 동일).
             applyEvent(event);
           } else if (
             event.type === "chat_delta" &&

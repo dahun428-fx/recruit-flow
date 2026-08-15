@@ -1,21 +1,16 @@
-// 캔버스 탭 본체 — 팔레트 | React Flow 캔버스 | 사이드 패널 3분할.
-// M3: 트레이 승인(U3), card_run started → run 연동(U6).
+// 캔버스 탭 본체 — 그래프 로딩 + Canvas 렌더만.
+// M4: Palette/SidePanel/Resizer 제거. FileExplorer가 블록 소스, NodeEditor 탭이 속성 편집.
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { api } from "@/lib/api";
 import { useCanvasStore } from "@/store/canvas";
-import { usePanelSize } from "@/hooks/usePanelWidth";
 import {
   recallActiveRun,
   useRunStream,
 } from "@/hooks/useRunStream";
-import { useGraphSave } from "@/hooks/useGraphSave";
-import { Palette } from "./Palette";
 import { Canvas, addBlockAtDefault } from "./Canvas";
-import { SidePanel } from "@/components/panel/SidePanel";
-import { Resizer } from "@/components/shell/Resizer";
 import type { BlockDef, NodeType } from "@/lib/types";
 import { makeNode } from "./blocks";
 import styles from "./PipelineView.module.css";
@@ -24,30 +19,18 @@ interface Props {
   pipelineId: string;
   /** 채팅 독에서 Human 노드 카드로 스크롤 요청 시 호출 */
   onScrollToHumanCard?: (nodeId: string) => void;
+  /** M4: 캔버스 노드 클릭 → 노드 에디터 탭 열기 (nodeId, blockDefId | null) */
+  onNodeClick?: (nodeId: string, blockDefId: string | null) => void;
 }
 
-export function PipelineView({ pipelineId, onScrollToHumanCard }: Props) {
+export function PipelineView({ pipelineId, onScrollToHumanCard, onNodeClick }: Props) {
   const setPipeline = useCanvasStore((s) => s.setPipeline);
   const addNode = useCanvasStore((s) => s.addNode);
   const [loaded, setLoaded] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const save = useGraphSave();
 
   const snapshotRunId = useCanvasStore((s) => s.snapshotRunId);
   const isSnapshot = !!snapshotRunId;
-
-  const palette = usePanelSize("palette", {
-    initial: 190,
-    min: 150,
-    maxVw: 0.55,
-    grow: "left",
-  });
-  const side = usePanelSize("sidepanel", {
-    initial: 340,
-    min: 260,
-    maxVw: 0.55,
-    grow: "right",
-  });
 
   // 그래프 로드 + lastOpenedAt 갱신 + 활성 run 복원.
   useEffect(() => {
@@ -110,26 +93,27 @@ export function PipelineView({ pipelineId, onScrollToHumanCard }: Props) {
 
   useRunStream(snapshotRunId ? null : activeRunId, pipelineId);
 
-  // 더블클릭 추가 — 기존 노드 수 기준 배치.
-  const onAddBlock = useCallback(
+  // M4: FileExplorer에서 addBlock 요청 처리 (addBlockAtDefault로 캔버스 배치)
+  const handleAddBlock = useCallback(
     (type: NodeType, blockDef?: BlockDef) => {
       const count = useCanvasStore.getState().nodes.length;
       const node = addBlockAtDefault(pipelineId, type, count);
-      // blockDef 정의가 있으면 config/name 복사
       if (blockDef) {
-        addNode({ ...node, name: blockDef.name, config: blockDef.config });
+        // 참조 노드 — blockDefId 연결, config는 빈 오버라이드.
+        addNode({ ...node, name: blockDef.name, blockDefId: blockDef.id, config: {} });
       } else {
+        // 빈 블록(정의 없음) — 맨손 노드(blockDefId=null, 기본 config).
         addNode(node);
       }
-      save();
+      // debounce 저장은 Canvas 내부에서 처리하므로 여기서는 직접 저장
+      api.saveGraph(pipelineId, useCanvasStore.getState().nodes, useCanvasStore.getState().edges).catch(() => {});
     },
-    [pipelineId, addNode, save],
+    [pipelineId, addNode],
   );
 
-  // U3: 트레이 항목 드래그 드롭 승인
+  // M4: 트레이 항목 드래그 드롭 승인
   const onTrayDrop = useCallback(
     async (blockDefId: string, pos: { x: number; y: number }) => {
-      // blockDef 조회
       try {
         const res = await fetch(`/api/block-defs?all=1`);
         const defs: BlockDef[] = await res.json();
@@ -141,26 +125,15 @@ export function PipelineView({ pipelineId, onScrollToHumanCard }: Props) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ tray: false }),
         });
-        // 노드 생성
+        // 참조 노드 생성
         const node = makeNode(pipelineId, def.type, pos.x, pos.y);
-        addNode({ ...node, name: def.name, config: def.config });
-        save();
+        addNode({ ...node, name: def.name, blockDefId: def.id, config: {} });
+        api.saveGraph(pipelineId, useCanvasStore.getState().nodes, useCanvasStore.getState().edges).catch(() => {});
       } catch {
         // 무시
       }
     },
-    [pipelineId, addNode, save],
-  );
-
-  // U3: 팔레트 onApproveTray(더블클릭 승인) — 캔버스 기본 위치에 배치
-  const onApproveTray = useCallback(
-    (def: BlockDef) => {
-      const count = useCanvasStore.getState().nodes.length;
-      const node = addBlockAtDefault(pipelineId, def.type, count);
-      addNode({ ...node, name: def.name, config: def.config });
-      save();
-    },
-    [pipelineId, addNode, save],
+    [pipelineId, addNode],
   );
 
   // Output 다운로드 — 새 창으로 열어 브라우저 다운로드.
@@ -184,33 +157,18 @@ export function PipelineView({ pipelineId, onScrollToHumanCard }: Props) {
   return (
     <ReactFlowProvider>
       <div className={styles.view}>
-        {/* 스냅샷 모드일 때 팔레트 숨김 */}
-        {!isSnapshot && (
-          <>
-            <div style={{ width: palette.size, flex: "none" }}>
-              <Palette
-                onAddBlock={onAddBlock}
-                onApproveTray={onApproveTray}
-              />
-            </div>
-            <Resizer vertical onMouseDown={palette.onMouseDown(true)} />
-          </>
-        )}
-
         <Canvas
           onDownload={onDownload}
           onHumanClick={onHumanClick}
           readOnly={isSnapshot}
           onTrayDrop={onTrayDrop}
+          onNodeClick={onNodeClick}
         />
-
-        <Resizer vertical onMouseDown={side.onMouseDown(true)} />
-        <div style={{ width: side.size, flex: "none", display: "flex" }}>
-          <SidePanel onDownload={onDownload} />
-        </div>
       </div>
     </ReactFlowProvider>
   );
 }
 
 export { type Props as PipelineViewProps };
+// M4: handleAddBlock은 AppShell에서 FileExplorer onAddBlock 연결 시 사용.
+export { addBlockAtDefault };

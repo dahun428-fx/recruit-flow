@@ -103,6 +103,7 @@ export function makeNode(
     name: defaultName(type),
     positionX,
     positionY,
+    blockDefId: null,
     config: defaultConfig(type),
   };
 }

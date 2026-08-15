@@ -1,11 +1,12 @@
 // React Flow 커스텀 노드 5종(Agent/Input/Output/Gate/Human) — 목업 카드 형태.
 // Gate: 마름모 느낌 변형 카드 + pass/fail 2출력 핸들.
 // Human: 사람 아이콘 + waiting_human 주황 점멸.
-// 타입 색 헤더 · 좌우 핸들 · 상단 장착 핸들(Agent) · 상태 색/애니메이션.
+// 타입 색 헤더 · 좌우 핸들 · 상태 색/애니메이션.
+// M4: Agent 카드 하단 장착 칩(MountRef 배열), 칩 X 해제 → onRemoveMount 콜백.
 "use client";
 
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import type { NodeType } from "@/lib/types";
+import type { MountRef, NodeType } from "@/lib/types";
 import type { NodeVisualStatus } from "@/store/canvas";
 import styles from "./FlowNode.module.css";
 
@@ -20,18 +21,40 @@ export interface FlowNodeData {
   /** Human 노드 클릭 → 채팅 독 스크롤(nodeRunId 기준). */
   onHumanClick?: (nodeId: string) => void;
   nodeId?: string;
+  /** M4: Agent 장착 칩 목록 */
+  mounts?: MountRef[];
+  /** M4: blockDefId → { name, type } 조회 맵 (칩 라벨용) */
+  mountDefMap?: Record<string, { name: string; type: string }>;
+  /** M4: 칩 X 버튼 → blockDefId 전달 */
+  onRemoveMount?: (nodeId: string, blockDefId: string) => void;
+  /** M4: 노드 클릭 → 정의 파일 탭 열기 */
+  onNodeClick?: (nodeId: string, blockDefId: string | null) => void;
+  blockDefId?: string | null;
   [key: string]: unknown;
 }
 
 const HEADER: Record<NodeType, { cls: string; icon: string; label: string }> = {
-  input: { cls: styles.hdInput, icon: "📄", label: "INPUT" },
-  agent: { cls: styles.hdAgent, icon: "🤖", label: "AGENT" },
-  output: { cls: styles.hdOutput, icon: "📦", label: "OUTPUT" },
-  gate: { cls: styles.hdGate, icon: "◆", label: "GATE" },
-  human: { cls: styles.hdHuman, icon: "🙋", label: "HUMAN" },
-  skill: { cls: styles.hdMount, icon: "◇", label: "SKILL" },
-  rule: { cls: styles.hdMount, icon: "◇", label: "RULE" },
-  tool: { cls: styles.hdMount, icon: "◇", label: "TOOL" },
+  input: { cls: styles.hdInput, icon: "📄", label: "자료" },
+  agent: { cls: styles.hdAgent, icon: "🤖", label: "에이전트" },
+  output: { cls: styles.hdOutput, icon: "📦", label: "완성본" },
+  gate: { cls: styles.hdGate, icon: "◆", label: "관문" },
+  human: { cls: styles.hdHuman, icon: "🙋", label: "내 검토" },
+  skill: { cls: styles.hdMount, icon: "◇", label: "기술" },
+  rule: { cls: styles.hdMount, icon: "◇", label: "규칙" },
+  tool: { cls: styles.hdMount, icon: "◇", label: "도구" },
+};
+
+/** 장착 칩 색 (결정 3: 기술/규칙/도구 색 구분). */
+const MOUNT_CHIP_COLOR: Record<string, string> = {
+  skill: "var(--c-mount)",
+  rule: "#e6a817",
+  tool: "#2ea2a2",
+};
+
+const MOUNT_CHIP_LABEL: Record<string, string> = {
+  skill: "기술",
+  rule: "규칙",
+  tool: "도구",
 };
 
 const STATUS_LABEL: Record<NodeVisualStatus, string> = {
@@ -65,6 +88,7 @@ export function FlowNode({ data, selected, id: rfId }: NodeProps) {
   const isGate = d.type === "gate";
   const isHuman = d.type === "human";
   const isAgent = d.type === "agent";
+  const nodeId = d.nodeId ?? rfId;
 
   // Gate: 마름모 느낌 변형 카드
   const nodeClassName = [
@@ -76,19 +100,32 @@ export function FlowNode({ data, selected, id: rfId }: NodeProps) {
     .filter(Boolean)
     .join(" ");
 
+  function handleClick(e: React.MouseEvent) {
+    if (isHuman && d.status === "waiting_human" && d.onHumanClick) {
+      e.stopPropagation();
+      d.onHumanClick!(nodeId);
+      return;
+    }
+    // 노드 클릭 → 정의 파일 탭 열기
+    if (d.onNodeClick) {
+      d.onNodeClick(nodeId, d.blockDefId ?? null);
+    }
+  }
+
+  const mounts = isAgent ? (d.mounts ?? []) : [];
+
   return (
     <div
       className={nodeClassName}
-      data-testid={`node-${d.nodeId ?? rfId}`}
-      onClick={
-        isHuman && d.status === "waiting_human" && d.onHumanClick
-          ? (e) => {
-              e.stopPropagation();
-              d.onHumanClick!(d.nodeId ?? rfId);
-            }
+      data-testid={`node-${nodeId}`}
+      onClick={handleClick}
+      style={
+        isHuman && d.status === "waiting_human"
+          ? { cursor: "pointer" }
+          : d.onNodeClick
+          ? { cursor: "pointer" }
           : undefined
       }
-      style={isHuman && d.status === "waiting_human" ? { cursor: "pointer" } : undefined}
     >
       {/* 좌측 입력 핸들 — Input에는 없음, Gate/Human 포함 */}
       {d.type !== "input" && (
@@ -97,21 +134,6 @@ export function FlowNode({ data, selected, id: rfId }: NodeProps) {
           position={Position.Left}
           id="left"
           className={styles.handle}
-        />
-      )}
-
-      {/* Agent 상단 장착 핸들 — pill 연결 수신 */}
-      {isAgent && (
-        <Handle
-          type="target"
-          position={Position.Top}
-          id="top"
-          className={styles.handle}
-          style={{
-            background: "#fff",
-            border: "2px solid #b08fd8",
-            top: -6,
-          }}
         />
       )}
 
@@ -135,6 +157,42 @@ export function FlowNode({ data, selected, id: rfId }: NodeProps) {
           >
             ⬇ HTML
           </button>
+        )}
+
+        {/* M4: Agent 장착 칩 영역 */}
+        {isAgent && mounts.length > 0 && (
+          <div className={styles.mountChips} data-testid={`mount-chips-${nodeId}`}>
+            {mounts.map((m) => {
+              const defInfo = d.mountDefMap?.[m.blockDefId];
+              const defType = defInfo?.type ?? "skill";
+              const chipLabel = defInfo?.name
+                ? `${MOUNT_CHIP_LABEL[defType] ?? "장착"}: ${defInfo.name}`
+                : MOUNT_CHIP_LABEL[defType] ?? "장착";
+              const color = MOUNT_CHIP_COLOR[defType] ?? "var(--c-mount)";
+              return (
+                <span
+                  key={m.blockDefId}
+                  className={styles.mountChip}
+                  style={{ background: color }}
+                  data-testid={`mount-chip-${nodeId}-${m.blockDefId}`}
+                  title={chipLabel}
+                >
+                  <span className={styles.mountChipLabel}>{chipLabel}</span>
+                  <button
+                    className={styles.mountChipRemove}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      d.onRemoveMount?.(nodeId, m.blockDefId);
+                    }}
+                    aria-label="장착 해제"
+                    title="장착 해제"
+                  >
+                    ×
+                  </button>
+                </span>
+              );
+            })}
+          </div>
         )}
       </div>
 

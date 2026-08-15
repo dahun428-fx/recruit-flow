@@ -1,14 +1,16 @@
-// GET  /api/block-defs        → BlockDef[]  (기본: enabled 항목만; 팔레트 fetch)
-// GET  /api/block-defs?all=1  → BlockDef[]  (enabled 무관 전체, 큐레이션 UI용)
+// GET  /api/block-defs        → BlockDef[]  (전체 — 팔레트·탐색기 fetch)
 // POST /api/block-defs        → BlockDef    (블록 정의 생성 — 승격/임포터/수동 생성)
+//
+// M4 결정 5(enabled 토글 폐지): enabled로 목록을 거르지 않는다. 토글이 사라져
+// enabled=false를 다시 켤 UI가 없으므로, 필터링은 블록을 영구히 숨기는 함정이
+// 된다. `all` 파라미터는 하위호환으로 무시하고 항상 전체를 반환한다.
 import { NextResponse } from "next/server";
 import { createBlockDef, listBlockDefs } from "@/lib/db/queries";
 import { eventBus } from "@/lib/engine/events";
 import type { NodeConfig, NodeType } from "@/lib/types";
 
-export async function GET(req: Request) {
-  const all = new URL(req.url).searchParams.get("all") === "1";
-  return NextResponse.json(listBlockDefs({ enabledOnly: !all }));
+export async function GET() {
+  return NextResponse.json(listBlockDefs());
 }
 
 export async function POST(req: Request) {

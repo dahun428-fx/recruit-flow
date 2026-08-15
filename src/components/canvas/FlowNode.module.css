@@ -158,3 +158,45 @@
 @keyframes nodeWait {
   50% { border-color: #ffd9b0; }
 }
+
+/* M4: Agent 장착 칩 영역 */
+.mountChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 5px;
+}
+
+.mountChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 5px 1px 5px;
+  border-radius: 99px;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: #fff;
+  max-width: 110px;
+  overflow: hidden;
+}
+
+.mountChipLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.mountChipRemove {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.8);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 0;
+  flex-shrink: 0;
+}
+.mountChipRemove:hover {
+  color: #fff;
+}

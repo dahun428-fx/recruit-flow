@@ -16,6 +16,7 @@ import {
   runs,
 } from "./schema";
 import type {
+  AgentConfig,
   Artifact,
   ArtifactFormat,
   ArtifactMeta,
@@ -27,6 +28,7 @@ import type {
   DocumentVersion,
   EdgeRow,
   Graph,
+  MountRef,
   NodeConfig,
   NodeRow,
   NodeRun,
@@ -38,6 +40,62 @@ import type {
 } from "../types";
 
 const now = () => Date.now();
+
+// ===========================================================================
+// resolveNodeConfig — 참조+오버라이드 시맨틱(M4 결정 1·4-A).
+// runner가 스냅샷 생성 시 호출하는 헬퍼. 순수 함수 — DB 조회 있음.
+// ===========================================================================
+
+/**
+ * 노드의 실효 config를 반환한다.
+ *
+ * - blockDefId === null(맨손 노드): node.config 그대로 반환.
+ * - blockDefId !== null(정의 참조): block_def.config에 node.config 필드를
+ *   덮어쓴 완결 config 반환(얕은 필드별 병합).
+ *   Agent 타입이면 mounts 배열 각 MountRef도 resolve:
+ *     각 MountRef의 blockDefId 정의 config에 MountRef.override를 병합.
+ *
+ * 정의 행이 DB에 없으면(삭제 경합 등) node.config를 그대로 반환한다(방어).
+ */
+export function resolveNodeConfig(node: NodeRow): NodeConfig {
+  if (!node.blockDefId) {
+    // 맨손 노드 — config가 완결
+    return node.config as NodeConfig;
+  }
+
+  const def = getBlockDef(node.blockDefId);
+  if (!def) {
+    // 정의가 없으면(SET NULL 경합 등) 보유 config 그대로
+    return node.config as NodeConfig;
+  }
+
+  // 얕은 필드별 병합: 정의 config 위에 노드 오버라이드 덮어쓰기
+  const merged = { ...def.config, ...(node.config as Partial<NodeConfig>) } as NodeConfig;
+
+  // Agent 타입이면 mounts 배열도 resolve
+  if (node.type === "agent") {
+    const agentMerged = merged as AgentConfig;
+    if (agentMerged.mounts && agentMerged.mounts.length > 0) {
+      agentMerged.mounts = agentMerged.mounts.map((mountRef: MountRef) => {
+        const mountDef = getBlockDef(mountRef.blockDefId);
+        if (!mountDef) return mountRef; // 정의 없으면 ref 그대로
+        // MountRef.override를 정의 config 위에 덮어쓰기
+        const resolvedOverride = mountRef.override
+          ? { ...mountDef.config, ...mountRef.override }
+          : mountDef.config;
+        // type·name도 박제 — deriveMounts가 DB 재조회 없이 자족(스냅샷 불변성).
+        return {
+          ...mountRef,
+          type: mountDef.type as "skill" | "rule" | "tool",
+          name: mountDef.name,
+          override: resolvedOverride as MountRef["override"],
+        };
+      });
+    }
+  }
+
+  return merged;
+}
 
 // ===========================================================================
 // pipelines
@@ -127,6 +185,7 @@ export function saveGraph(pipelineId: string, graph: Graph): void {
           name: n.name,
           positionX: n.positionX,
           positionY: n.positionY,
+          blockDefId: n.blockDefId ?? null,
           config: n.config,
           createdAt: ts,
           updatedAt: ts,
@@ -649,6 +708,16 @@ export function setBlockDefName(id: string, name: string): BlockDef | null {
 }
 
 /**
+ * 정의 config 전체 교체(참조 시맨틱 결정 1 — 정의를 편집하는 유일한 진입점).
+ * PATCH /api/block-defs/[id] { config }에서 호출.
+ * 반환: 갱신된 BlockDef, 없으면 null.
+ */
+export function updateBlockDefConfig(id: string, config: NodeConfig): BlockDef | null {
+  db.update(blockDefs).set({ config }).where(eq(blockDefs.id, id)).run();
+  return getBlockDef(id);
+}
+
+/**
  * 트레이 승인(tray:false) 또는 트레이 대기(tray:true) 토글.
  * 챗봇이 add_block으로 트레이에 넣은 블록을 캔버스 드래그로 승인할 때 사용.
  */
@@ -729,7 +798,8 @@ function toNodeRow(r: NodeDbRow): NodeRow {
     name: r.name,
     positionX: r.positionX,
     positionY: r.positionY,
-    config: r.config as NodeConfig,
+    blockDefId: r.blockDefId ?? null,
+    config: r.config as Partial<NodeConfig>,
   };
 }
 

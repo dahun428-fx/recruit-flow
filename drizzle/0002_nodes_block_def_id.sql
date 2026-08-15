@@ -1,0 +1,1 @@
+ALTER TABLE `nodes` ADD `block_def_id` text REFERENCES `block_defs`(`id`) ON DELETE SET NULL;

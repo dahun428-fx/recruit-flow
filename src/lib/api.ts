@@ -2,11 +2,14 @@
 "use client";
 
 import type {
+  BlockDef,
   Document,
   DocumentDetail,
   EdgeRow,
   Graph,
+  NodeConfig,
   NodeRow,
+  NodeType,
   Pipeline,
   PipelineSummary,
   Run,
@@ -75,6 +78,20 @@ export const api = {
     fetch(`/api/runs/${runId}/cancel`, { method: "POST" }).then((r) =>
       json<{ ok: boolean }>(r),
     ),
+
+  createBlockDef: (params: {
+    type: NodeType;
+    name: string;
+    description: string;
+    config: NodeConfig;
+    origin: "human" | "chatbot" | "import";
+    tray: boolean;
+  }) =>
+    fetch("/api/block-defs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    }).then((r) => json<BlockDef>(r)),
 
   listDocuments: () =>
     fetch("/api/documents").then((r) => json<Document[]>(r)),

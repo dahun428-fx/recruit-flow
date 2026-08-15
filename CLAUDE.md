@@ -103,4 +103,16 @@ npx -y npm@11 ci     # 또는 volta install npm@11 로 영구 고정
 - TypeScript strict. 타입체크 통과가 모든 작업의 최소 완료 조건.
 - DB 파일 `data/recruit-flow.db`(gitignore), 스키마 변경은 반드시
   drizzle-kit 마이그레이션으로.
+- **회귀 게이트**: 기능 단위 완료 시점(qa-verifier 단계)에 `npm run e2e`
+  필수 실행(`specs/e2e.md` 회귀 게이트 계획 참조).
+- **스크린샷 베이스라인**: 에이전트는 `--update-snapshots` 실행 금지.
+  불일치 시 diff를 사용자에게 제시하고, 갱신은 사용자가 직접 명령.
+- **검증은 격리 DB 필수**: qa-verifier·스모크·e2e 등 모든 검증 실행은
+  실 DB(`data/recruit-flow.db`)를 절대 건드리지 않는다 — 반드시 격리
+  DB(`tmp/e2e/` 등, `RECRUIT_FLOW_DB` env)로 서버를 띄운다. 2026-08-15
+  실 DB에서 QA 잔해 파이프라인 4개를 청소한 재발 방지 규칙.
+- **Windows CLI 한글 함정**: sqlite3·curl 등 외부 CLI에 한글을 명령행
+  인자로 넘기면 cp949로 깨진 채 저장된다(U+FFFD 오염 사고 원인). 한글
+  데이터 쓰기는 UTF-8 파일 경유(`sqlite3 < file.sql`) 또는 앱 API
+  (`Content-Type: application/json; charset=utf-8`)로만.
 - 이 저장소는 독립 git 저장소다(부모 `C:\workspaces` 저장소와 분리).

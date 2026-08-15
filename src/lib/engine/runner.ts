@@ -11,6 +11,7 @@ import {
   getGraph,
   getRun,
   getRunSnapshot,
+  resolveNodeConfig,
   setNodeRunGateDecision,
   setNodeRunStatus,
   setRunStatus,
@@ -100,11 +101,21 @@ class Runner {
 
   start(pipelineId: string): RunStartResult {
     const graph = getGraph(pipelineId);
-    const errors: ValidationError[] = validateGraph(graph.nodes, graph.edges);
+
+    // engine.md §1: 스냅샷 생성 시 참조를 resolve — 각 노드 config를 완결화하고
+    // Agent의 config.mounts도 정의를 박제한다. 이 완결 스냅샷을 runs.graph_snapshot에
+    // 저장하고 러너도 그것으로 실행하므로, 실행 시작 후 정의를 고쳐도 이 run은 불변.
+    //
+    // 검증도 반드시 resolve 뒤에 한다: 참조 노드는 raw config={}(실효 config는
+    // block_def)라 outputFormat이 raw에는 없다. resolve 전 그래프로 검증하면
+    // 참조 Agent의 outputFormat을 못 읽어 gate_json_upstream/output_markdown_count를
+    // 오검증한다(R1 회귀). resolveGraph는 한 번만 호출.
+    const snapshot = resolveGraph(graph);
+    const errors: ValidationError[] = validateGraph(snapshot.nodes, snapshot.edges);
     if (errors.length > 0) return { errors };
 
-    const run = createRun(pipelineId, graph, null);
-    const control = this.buildControl(run.id, pipelineId, graph);
+    const run = createRun(pipelineId, snapshot, null);
+    const control = this.buildControl(run.id, pipelineId, snapshot);
 
     // 루트 노드(상류 없는 flow 노드)만 초기 큐잉 — node_run 생성.
     // 장착 계층 노드(skill/rule/tool)는 실행 대상이 아니므로 node_run을 만들지
@@ -132,10 +143,14 @@ class Runner {
    * from_node부터 하류만 큐잉(§8-B). 현재 그래프로 스냅샷.
    */
   startFrom(pipelineId: string, fromNodeId: string, upstreamRunId: string): RunStartResult {
-    const graph = getGraph(pipelineId);
+    const liveGraph = getGraph(pipelineId);
+
+    // 부분 재실행도 현재 그래프를 resolve해 완결 스냅샷으로 고정(engine.md §1).
+    // 검증은 resolve 뒤에 — 참조 노드 outputFormat이 block_def에 있어 raw로는
+    // 오검증되기 때문(start와 동일한 R1 회귀 방지).
+    const graph = resolveGraph(liveGraph);
     const errors: ValidationError[] = validateGraph(graph.nodes, graph.edges);
     if (errors.length > 0) return { errors };
-
     const index = indexGraph(graph.nodes, graph.edges);
     if (!index.nodeById.has(fromNodeId)) {
       return {
@@ -1168,6 +1183,26 @@ class Runner {
       .get();
     return row?.id ?? null;
   }
+}
+
+/**
+ * 그래프의 각 노드 config를 resolveNodeConfig로 완결화한 새 그래프를 만든다
+ * (engine.md §1 스냅샷 resolve). 엣지는 그대로. 원본 노드는 변형하지 않는다.
+ * - blockDefId 있는 노드: block_def.config ⊕ node.config로 완결.
+ * - Agent의 config.mounts: 각 MountRef의 정의를 resolve해 content·type·name 박제.
+ * 이 완결 config를 config에 담되 blockDefId는 null로 떨어뜨린다 — 스냅샷은 더
+ * 이상 정의를 참조하지 않는(자족) 불변 사진이어야 하기 때문(정의 변경·삭제
+ * 무관). resolveNodeConfig는 DB를 읽으므로 스냅샷 생성 1회만 호출된다.
+ */
+function resolveGraph(graph: Graph): Graph {
+  return {
+    nodes: graph.nodes.map((n) => ({
+      ...n,
+      blockDefId: null,
+      config: resolveNodeConfig(n),
+    })),
+    edges: graph.edges,
+  };
 }
 
 /** OutputConfig.filenameRule에서 title 추출(없으면 노드 이름). */

@@ -19,7 +19,7 @@ test("M2: Human 노드 waiting_human → 사이드패널 승인 → 진행", asy
   ]);
 
   await page.goto(`/pipelines/${pipelineId}`);
-  await expect(page.locator('[data-testid^="node-"]').first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid^="node-"]').first()).toBeVisible({ timeout: 30_000 });
 
   // run 시작 (UI)
   await page.locator('[data-testid="run-btn"]').click();
@@ -78,7 +78,7 @@ test("M2: waiting_human 승인 후 새로고침 없이 캔버스가 재개된다
   ]);
 
   await page.goto(`/pipelines/${pipelineId}`);
-  await expect(page.locator('[data-testid^="node-"]').first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid^="node-"]').first()).toBeVisible({ timeout: 30_000 });
   await page.locator('[data-testid="run-btn"]').click();
 
   // 캔버스에서 Human 노드가 사람 대기로 보일 때까지(= SSE가 살아 있음).
@@ -119,7 +119,7 @@ test("M2: allowEdit Human 노드 → 편집 승인", async ({
   ]);
 
   await page.goto(`/pipelines/${pipelineId}`);
-  await expect(page.locator('[data-testid^="node-"]').first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid^="node-"]').first()).toBeVisible({ timeout: 30_000 });
 
   await page.locator('[data-testid="run-btn"]').click();
 

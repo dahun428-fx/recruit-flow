@@ -1,10 +1,10 @@
-// 상단 바 — 로고, [캔버스]/[문서] 탭, 파이프라인 드롭다운, run 히스토리 드롭다운, Run 버튼.
-// M2b: run 히스토리 드롭다운 활성 + 스냅샷 모드 전환.
+// 상단 바 — 로고, 파이프라인 드롭다운, run 히스토리 드롭다운, Run 버튼.
+// M4: [캔버스]/[문서] 탭 링크 제거 — TabEditor가 탭을 관리하고, 문서는 FileExplorer에서 열림.
 "use client";
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useCanvasStore } from "@/store/canvas";
 import { useRunController } from "@/hooks/useRunController";
@@ -33,7 +33,6 @@ function runLabel(r: Run): string {
 }
 
 export function TopBar() {
-  const pathname = usePathname();
   const router = useRouter();
   const pipelineId = useCanvasStore((s) => s.pipelineId);
   const snapshotRunId = useCanvasStore((s) => s.snapshotRunId);
@@ -45,7 +44,6 @@ export function TopBar() {
   const menuRef = useRef<HTMLDivElement>(null);
   const histRef = useRef<HTMLDivElement>(null);
 
-  const isDocs = pathname?.startsWith("/documents");
   const currentPipeline = pipelines.find((p) => p.id === pipelineId);
 
   const run = useRunController();
@@ -108,23 +106,6 @@ export function TopBar() {
       <Link href="/" className={styles.logo}>
         recruit-flow
       </Link>
-
-      <div className={styles.tabs}>
-        <Link
-          href={pipelineId ? `/pipelines/${pipelineId}` : "/"}
-          className={!isDocs ? styles.active : undefined}
-          data-tip="파이프라인 캔버스. 블록을 조립하고 실행 상태를 봅니다"
-        >
-          캔버스
-        </Link>
-        <Link
-          href="/documents"
-          className={isDocs ? styles.active : undefined}
-          data-tip="문서 라이브러리. JD·증거를 입력하고 버전 관리합니다"
-        >
-          문서
-        </Link>
-      </div>
 
       <div className={styles.dropdownWrap} ref={menuRef}>
         <button

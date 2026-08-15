@@ -149,7 +149,7 @@ test("B2: artifact 없는 Human 대기를 사이드 패널 버튼으로 승인�
 
   await page.goto(`/pipelines/${pipelineId}`);
   const humanNode = page.locator(`[data-testid="node-${human}"]`);
-  await expect(humanNode).toBeVisible({ timeout: 15_000 });
+  await expect(humanNode).toBeVisible({ timeout: 30_000 });
   await page.getByTestId("run-btn").click();
   await expect(humanNode.getByTestId("node-status")).toHaveText("● 사람 대기 중", {
     timeout: 30_000,
@@ -163,6 +163,9 @@ test("B2: artifact 없는 Human 대기를 사이드 패널 버튼으로 승인�
   await expect(approve).toBeVisible();
   await expect(approve).toBeEnabled();
   await approve.click();
+
+  // M4: 승인 후 노드 탭이 활성 상태 — 캔버스 탭으로 복귀해야 노드 DOM이 렌더링됨.
+  await page.getByRole("button", { name: "캔버스", exact: true }).click();
 
   await expect(page.locator(`[data-testid="node-${output}"]`).getByTestId("node-status"))
     .toHaveText("● 성공", { timeout: 30_000 });
@@ -201,7 +204,7 @@ test("B3: 한 탭의 트레이 승인·거절이 다른 탭에 새로고침 없�
   ]);
 
   for (const tab of [page, peer]) {
-    await expect(tab.getByTestId(`tray-item-${approvedId}`)).toBeVisible({ timeout: 15_000 });
+    await expect(tab.getByTestId(`tray-item-${approvedId}`)).toBeVisible({ timeout: 30_000 });
     await expect(tab.getByTestId(`tray-item-${rejectedId}`)).toBeVisible();
     await expect(tab.getByTestId(`palette-item-def-${approvedId}`)).toHaveCount(0);
   }

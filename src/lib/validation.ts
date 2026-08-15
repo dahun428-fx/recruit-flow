@@ -128,23 +128,20 @@ export function validateGraph(
     return errors;
   }
 
-  // 유효한 엣지만(양 끝 노드가 실재) 인접 리스트로. flow(데이터 흐름)와
-  // mount(장착)를 분리 — 위상·join·마크다운 판정은 flow만, 배선 제약은 별도.
+  // 유효한 엣지만(양 끝 노드가 실재) flow 인접 리스트로. M4 재설계로 mount 엣지·
+  // skill/rule/tool 노드는 폐기됐다(장착은 Agent config.mounts[] 칩) — 기존 데이터에
+  // 남아 있을 수 있는 mount 엣지는 위상·고아 판정에서 조용히 무시한다(방어).
   const incoming = new Map<string, string[]>();
   const outgoing = new Map<string, string[]>();
   for (const n of nodes) {
     incoming.set(n.id, []);
     outgoing.set(n.id, []);
   }
-  const mountEdges: EdgeRow[] = [];
   for (const e of edges) {
     if (!nodeById.has(e.sourceNodeId) || !nodeById.has(e.targetNodeId)) {
       continue; // 끊긴 엣지는 무시(그래프 저장 정합성은 별개)
     }
-    if (e.kind === "mount") {
-      mountEdges.push(e);
-      continue;
-    }
+    if (e.kind === "mount") continue; // 폐기된 장착 엣지 — 무시.
     // Gate fail 엣지는 재실행 라우팅(역방향 back-edge) — 전방 데이터 흐름이 아니다.
     // 위상·사이클·입력 판정에서 제외(러너 flowUpstream과 동일 규약, nodes.md Q13).
     if (e.sourceHandle === "fail") continue;
@@ -152,21 +149,15 @@ export function validateGraph(
     incoming.get(e.targetNodeId)!.push(e.sourceNodeId);
   }
 
-  // 노드별 mount 차수(고아 판정·배선 제약).
-  const mountDegree = new Map<string, number>();
-  for (const n of nodes) mountDegree.set(n.id, 0);
-  for (const e of mountEdges) {
-    mountDegree.set(e.sourceNodeId, (mountDegree.get(e.sourceNodeId) ?? 0) + 1);
-    mountDegree.set(e.targetNodeId, (mountDegree.get(e.targetNodeId) ?? 0) + 1);
-  }
-
-  // --- 1. 고아 노드: 노드가 2개 이상인데 flow·mount 연결이 전혀 없는 노드.
+  // --- 1. 고아 노드: 노드가 2개 이상인데 flow 연결이 전혀 없는 노드.
+  //   폐기된 장착 노드(skill/rule/tool)는 원래 flow가 없으므로 고아 검사에서 제외
+  //   한다(기존 데이터에 남은 vestigial 노드가 run 시작을 막지 않도록 — 러너도
+  //   이들을 실행 대상에서 건너뛴다).
   if (nodes.length > 1) {
     for (const n of nodes) {
+      if (MOUNT_NODE_TYPES.includes(n.type)) continue;
       const deg =
-        (incoming.get(n.id)?.length ?? 0) +
-        (outgoing.get(n.id)?.length ?? 0) +
-        (mountDegree.get(n.id) ?? 0);
+        (incoming.get(n.id)?.length ?? 0) + (outgoing.get(n.id)?.length ?? 0);
       if (deg === 0) {
         errors.push({
           code: "orphan",
@@ -254,31 +245,25 @@ export function validateGraph(
     }
   }
 
-  // --- 5. mount 배선 제약: source=장착 노드(skill/rule/tool), target=Agent.
-  for (const e of mountEdges) {
-    const src = nodeById.get(e.sourceNodeId);
-    const tgt = nodeById.get(e.targetNodeId);
-    const srcOk = !!src && MOUNT_NODE_TYPES.includes(src.type);
-    const tgtOk = !!tgt && tgt.type === "agent";
-    if (!srcOk || !tgtOk) {
-      errors.push({
-        code: "mount_wiring",
-        nodeId: e.sourceNodeId,
-        message: `장착(점선) 엣지는 skill/rule/tool → agent만 허용됩니다.`,
-      });
-    }
-  }
-  // 실행 노드끼리 mount로 잇거나, 장착 노드가 flow로 이어진 경우도 배선 위반.
+  // --- 5. (폐기) mount 배선 제약. M4 재설계로 skill/rule/tool 노드·점선 mount
+  //   엣지가 사라지고 장착은 Agent config.mounts[] 칩이 됐다(engine.md §1,
+  //   nodes.md §7). 배선 규칙(mount_wiring)은 검사 대상이 없어져 제거한다.
+  //   대신 각 Agent의 config.mounts가 참조하는 정의 id가 비어 있지 않은지만
+  //   가볍게 검사한다(빈 blockDefId는 resolve 불가 → 장착 유실). 실재 여부까지는
+  //   여기서 확인하지 않는다(검증은 순수 함수 — DB 조회 없음).
   for (const n of nodes) {
-    if (!MOUNT_NODE_TYPES.includes(n.type)) continue;
-    const flowDeg =
-      (incoming.get(n.id)?.length ?? 0) + (outgoing.get(n.id)?.length ?? 0);
-    if (flowDeg > 0) {
-      errors.push({
-        code: "mount_wiring",
-        nodeId: n.id,
-        message: `장착 노드 "${n.name}"는 실선(flow)으로 연결할 수 없습니다(점선 장착만).`,
-      });
+    if (n.type !== "agent") continue;
+    const mounts = (n.config as { mounts?: { blockDefId?: string }[] }).mounts;
+    if (!mounts) continue;
+    for (const m of mounts) {
+      if (typeof m.blockDefId !== "string" || m.blockDefId.trim() === "") {
+        errors.push({
+          code: "mount_wiring",
+          nodeId: n.id,
+          message: `Agent "${n.name}"에 정의 참조가 빈 장착이 있습니다.`,
+        });
+        break;
+      }
     }
   }
 

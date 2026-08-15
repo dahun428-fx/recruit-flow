@@ -1,5 +1,5 @@
 // React Flow 캔버스 — 스토어 nodes/edges를 RF로 투영, 편집을 스토어에 반영.
-// M2b: Gate/Human 노드, Pill 노드, 점선 mount 엣지, 배선 제약, 우클릭 부분재실행.
+// M4: PillNode/MountEdge 폐기, 팔레트 skill/rule/tool → Agent 드래그 장착.
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -15,47 +15,58 @@ import {
   type EdgeChange,
   type NodeTypes,
   useReactFlow,
+  useNodesInitialized,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { nanoid } from "nanoid";
 import { api } from "@/lib/api";
 import {
-  NODE_COLOR,
   useCanvasStore,
   type NodeVisualStatus,
 } from "@/store/canvas";
 import type {
   AgentConfig,
+  BlockDef,
   EdgeRow,
   GateConfig,
   InputConfig,
+  MountRef,
   NodeRow,
 } from "@/lib/types";
-import { EXEC_NODE_TYPES, MOUNT_NODE_TYPES } from "@/lib/types";
+import { MOUNT_NODE_TYPES } from "@/lib/types";
 import { FlowNode, type FlowNodeData } from "./FlowNode";
-import { PillNode, type PillNodeData } from "./PillNode";
-import { MountEdge } from "./MountEdge";
-import { DRAG_MIME, TRAY_DRAG_MIME, parseDropType } from "./Palette";
+import { DRAG_MIME, TRAY_DRAG_MIME, parseDropType } from "@/lib/drag";
 import { makeNode } from "./blocks";
 import styles from "./Canvas.module.css";
 
-const nodeTypes: NodeTypes = { rf: FlowNode, pill: PillNode };
-const edgeTypes: EdgeTypes = { mount: MountEdge };
+const nodeTypes: NodeTypes = { rf: FlowNode };
+const edgeTypes: EdgeTypes = {};
 
-/** NodeRow → 한 줄 요약(카드 desc). */
-function describe(node: NodeRow): string {
+/** NodeRow → 한 줄 요약(카드 desc).
+ * 참조 노드(blockDefId≠null)는 정의 config와 인스턴스 config를 merge해 표시한다(결정 1).
+ */
+function describe(
+  node: NodeRow,
+  defConfigMap?: Record<string, import("@/lib/types").NodeConfig>,
+): string {
+  // 참조 노드: 정의 config를 베이스로 인스턴스 오버라이드를 병합.
+  const resolvedConfig =
+    node.blockDefId && defConfigMap?.[node.blockDefId]
+      ? { ...defConfigMap[node.blockDefId], ...node.config }
+      : node.config;
+
   if (node.type === "agent") {
-    const c = node.config as AgentConfig;
+    const c = resolvedConfig as AgentConfig;
     return c.role ? c.role.slice(0, 40) : "역할 미설정";
   }
   if (node.type === "input") {
-    const c = node.config as InputConfig;
+    const c = resolvedConfig as InputConfig;
     if (c.documentId) return `문서: ${c.documentId}`;
     if (c.inlineText) return "인라인 텍스트";
     return "문서 미선택";
   }
   if (node.type === "gate") {
-    const c = node.config as GateConfig;
+    const c = resolvedConfig as GateConfig;
     return c.expr || "조건식 미설정";
   }
   if (node.type === "human") return "사람 검토 대기";
@@ -73,6 +84,8 @@ interface Props {
   readOnly?: boolean;
   /** 트레이 드래그 드롭 승인 시 blockDefId 전달 */
   onTrayDrop?: (blockDefId: string, pos: { x: number; y: number }) => void;
+  /** M4: 노드 클릭 → 정의 파일 탭 열기 (nodeId, blockDefId | null) */
+  onNodeClick?: (nodeId: string, blockDefId: string | null) => void;
 }
 
 interface ContextMenu {
@@ -81,7 +94,7 @@ interface ContextMenu {
   y: number;
 }
 
-export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop }: Props) {
+export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeClick }: Props) {
   const pipelineId = useCanvasStore((s) => s.pipelineId);
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
@@ -94,12 +107,58 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop }: Props
   const addEdge = useCanvasStore((s) => s.addEdge);
   const removeEdge = useCanvasStore((s) => s.removeEdge);
   const select = useCanvasStore((s) => s.select);
+  const updateAgentMounts = useCanvasStore((s) => s.updateAgentMounts);
 
   const rf = useReactFlow();
   const wrapRef = useRef<HTMLDivElement>(null);
 
+  // 초기 진입 시 노드를 뷰에 맞춘다. ReactFlow의 `fitView` prop은 초기 1회만
+  // 실행돼, 스토어 노드가 비동기로 채워지면 빈 노드셋에 fitView가 걸려 노드가
+  // 뷰 밖(hidden)에 남는 레이스가 있었다(e2e ~25% flake). 노드 "측정 완료"
+  // (useNodesInitialized) 시점에 한 번 더 맞춰 안정화한다. 이후 사용자의 추가
+  // 배치는 didFit 가드로 뷰를 흔들지 않는다.
+  const nodesInitialized = useNodesInitialized();
+  const didFitRef = useRef(false);
+  useEffect(() => {
+    if (didFitRef.current || !nodesInitialized) return;
+    if (rf.getNodes().length === 0) return;
+    didFitRef.current = true;
+    rf.fitView({ padding: 0.2 });
+  }, [nodesInitialized, rf]);
+
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [partialRunning, setPartialRunning] = useState(false);
+
+  // M4: blockDef 캐시(장착 칩 라벨용 + 참조 노드 config resolve용).
+  const [blockDefMap, setBlockDefMap] = useState<Record<string, { name: string; type: string }>>({});
+  // 참조 노드 config resolve용: blockDefId → 정의 config
+  const [defConfigMap, setDefConfigMap] = useState<Record<string, import("@/lib/types").NodeConfig>>({});
+
+  const loadBlockDefs = useCallback(() => {
+    fetch("/api/block-defs?all=1")
+      .then((r) => r.json())
+      .then((defs: BlockDef[]) => {
+        const m: Record<string, { name: string; type: string }> = {};
+        const cm: Record<string, import("@/lib/types").NodeConfig> = {};
+        for (const d of defs) {
+          m[d.id] = { name: d.name, type: d.type };
+          cm[d.id] = d.config;
+        }
+        setBlockDefMap(m);
+        setDefConfigMap(cm);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    loadBlockDefs();
+  }, [loadBlockDefs]);
+
+  // block_def 변경 이벤트 → 재조회(정의 수정 → 캔버스 참조 노드 재렌더).
+  useEffect(() => {
+    window.addEventListener("rf:blockDefsChanged", loadBlockDefs);
+    return () => window.removeEventListener("rf:blockDefsChanged", loadBlockDefs);
+  }, [loadBlockDefs]);
 
   // 컨텍스트 메뉴 외부 클릭 시 닫기
   useEffect(() => {
@@ -134,79 +193,81 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop }: Props
   const nodeRunId = run?.nodeRunId ?? {};
   const artifacts = run?.artifacts ?? {};
 
+  // M4: Agent 장착 해제 핸들러
+  const handleRemoveMount = useCallback(
+    (agentNodeId: string, blockDefId: string) => {
+      if (readOnly) return;
+      const agentNode = useCanvasStore.getState().nodes.find((n) => n.id === agentNodeId);
+      if (!agentNode || agentNode.type !== "agent") return;
+      const prevConfig = agentNode.config as Partial<AgentConfig>;
+      const prevMounts = prevConfig.mounts ?? [];
+      const nextMounts = prevMounts.filter((m) => m.blockDefId !== blockDefId);
+      updateAgentMounts(agentNodeId, nextMounts);
+      scheduleSave();
+    },
+    [readOnly, updateAgentMounts, scheduleSave],
+  );
+
   // ── 스토어 → RF 노드/엣지 투영 ──
   const rfNodes: Node[] = useMemo(
     () =>
-      nodes.map((n) => {
-        const isMountNode = (MOUNT_NODE_TYPES as string[]).includes(n.type);
-        if (isMountNode) {
-          const data: PillNodeData = {
+      nodes
+        // M4: skill/rule/tool 독립 캔버스 노드는 렌더하지 않음
+        .filter((n) => !(MOUNT_NODE_TYPES as string[]).includes(n.type))
+        .map((n) => {
+          const status: NodeVisualStatus = nodeStatus[n.id] ?? "idle";
+          const nrId = nodeRunId[n.id];
+          const art = nrId ? artifacts[nrId] : undefined;
+          const agentConfig = n.type === "agent" ? (n.config as Partial<AgentConfig>) : null;
+          const data: FlowNodeData = {
             type: n.type,
             name: n.name,
+            desc: describe(n, defConfigMap),
+            status,
+            downloadArtifactId:
+              n.type === "output" && art && art.format === "html" ? art.id : null,
+            onDownload,
+            onHumanClick,
+            nodeId: n.id,
+            mounts: agentConfig?.mounts,
+            mountDefMap: blockDefMap,
+            onRemoveMount: handleRemoveMount,
+            onNodeClick,
+            blockDefId: n.blockDefId,
           };
           return {
             id: n.id,
-            type: "pill",
+            type: "rf",
             position: { x: n.positionX, y: n.positionY },
             data,
             selected: n.id === selectedNodeId,
           };
-        }
-        const status: NodeVisualStatus = nodeStatus[n.id] ?? "idle";
-        const nrId = nodeRunId[n.id];
-        const art = nrId ? artifacts[nrId] : undefined;
-        const data: FlowNodeData = {
-          type: n.type,
-          name: n.name,
-          desc: describe(n),
-          status,
-          downloadArtifactId:
-            n.type === "output" && art && art.format === "html" ? art.id : null,
-          onDownload,
-          onHumanClick,
-          nodeId: n.id,
-        };
-        return {
-          id: n.id,
-          type: "rf",
-          position: { x: n.positionX, y: n.positionY },
-          data,
-          selected: n.id === selectedNodeId,
-        };
-      }),
-    [nodes, nodeStatus, nodeRunId, artifacts, selectedNodeId, onDownload, onHumanClick],
+        }),
+    [nodes, nodeStatus, nodeRunId, artifacts, selectedNodeId, onDownload, onHumanClick, blockDefMap, defConfigMap, handleRemoveMount, onNodeClick],
   );
 
   const rfEdges: Edge[] = useMemo(
     () =>
-      edges.map((e) => {
-        const isMountEdge = e.kind === "mount";
-        if (isMountEdge) {
+      edges
+        // M4: mount 엣지는 칩으로 대체 — 렌더하지 않음
+        .filter((e) => e.kind !== "mount")
+        .map((e) => {
+          // flow 엣지
+          const targetStatus = nodeStatus[e.targetNodeId];
+          // Gate의 pass/fail 소스 핸들
+          const sourceHandle = e.sourceHandle ?? "right";
           return {
             id: e.id,
             source: e.sourceNodeId,
             target: e.targetNodeId,
-            sourceHandle: "bottom",
-            targetHandle: "top",
-            type: "mount",
+            sourceHandle,
+            targetHandle: "left",
+            animated: targetStatus === "running",
+            style: { stroke: "#9aa4b5", strokeWidth: 2 },
+            label: e.sourceHandle === "pass" ? "pass" : e.sourceHandle === "fail" ? "fail" : undefined,
+            labelStyle: { fontSize: 10, fill: "#7a8494" },
           };
-        }
-        // flow 엣지
-        const targetStatus = nodeStatus[e.targetNodeId];
-        // Gate의 pass/fail 소스 핸들
-        const sourceHandle = e.sourceHandle ?? "right";
-        return {
-          id: e.id,
-          source: e.sourceNodeId,
-          target: e.targetNodeId,
-          sourceHandle,
-          targetHandle: "left",
-          animated: targetStatus === "running",
-          style: { stroke: "#9aa4b5", strokeWidth: 2 },
-          label: e.sourceHandle === "pass" ? "pass" : e.sourceHandle === "fail" ? "fail" : undefined,
-          labelStyle: { fontSize: 10, fill: "#7a8494" },
-        };
-      }),
+        }),
     [edges, nodeStatus],
   );
 
@@ -258,29 +319,17 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop }: Props
       const targetNode = state.nodes.find((n) => n.id === conn.target);
       if (!sourceNode || !targetNode) return;
 
-      const srcIsMountType = (MOUNT_NODE_TYPES as string[]).includes(sourceNode.type);
-      const tgtIsMountType = (MOUNT_NODE_TYPES as string[]).includes(targetNode.type);
-      const srcIsExecType = (EXEC_NODE_TYPES as string[]).includes(sourceNode.type);
-      const tgtIsExecType = (EXEC_NODE_TYPES as string[]).includes(targetNode.type);
+      // M4: 장착 계층 노드는 캔버스에 독립 배치하지 않으므로 연결 불가
+      if ((MOUNT_NODE_TYPES as string[]).includes(sourceNode.type)) return;
+      if ((MOUNT_NODE_TYPES as string[]).includes(targetNode.type)) return;
 
-      // 배선 제약:
-      // - 장착 → 장착 금지
-      // - 실행 → 장착 금지
-      // - 장착은 Agent의 top 핸들에만 연결 가능
-      if (srcIsMountType && tgtIsMountType) return;
-      if (srcIsExecType && tgtIsMountType) return;
-      if (srcIsMountType && !(targetNode.type === "agent" && conn.targetHandle === "top")) return;
-      // 실행끼리 실선, Input에 대한 입력 핸들 없음
+      // 실행 계층 배선 제약
       if (targetNode.type === "input") return;
-      // Output에서 출력 불가
       if (sourceNode.type === "output") return;
-
-      const isMountEdge = srcIsMountType && targetNode.type === "agent";
 
       // 중복 엣지 방지
       const exists = state.edges.some(
-        (e) => e.sourceNodeId === conn.source && e.targetNodeId === conn.target
-          && (isMountEdge ? e.kind === "mount" : e.kind === "flow"),
+        (e) => e.sourceNodeId === conn.source && e.targetNodeId === conn.target && e.kind === "flow",
       );
       if (exists) return;
 
@@ -290,8 +339,8 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop }: Props
         pipelineId,
         sourceNodeId: conn.source,
         targetNodeId: conn.target,
-        kind: isMountEdge ? "mount" : "flow",
-        sourceHandle: isMountEdge ? null : (conn.sourceHandle === "pass" ? "pass" : conn.sourceHandle === "fail" ? "fail" : null),
+        kind: "flow",
+        sourceHandle: conn.sourceHandle === "pass" ? "pass" : conn.sourceHandle === "fail" ? "fail" : null,
         inputOrder: order,
       };
       addEdge(edge);
@@ -318,6 +367,38 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop }: Props
       if (!key) return;
       const type = parseDropType(key);
       if (!type) return;
+
+      // M4 결정 3: skill/rule/tool은 캔버스 단독 배치 불가 → 드롭 대상 Agent에 장착
+      if ((MOUNT_NODE_TYPES as string[]).includes(type)) {
+        // 드롭 좌표 근처 Agent 노드 탐색(RF 좌표계)
+        const dropPos = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+        const state = useCanvasStore.getState();
+        // 반경 120px 내 가장 가까운 Agent 노드
+        let closest: NodeRow | null = null;
+        let minDist = Infinity;
+        for (const n of state.nodes) {
+          if (n.type !== "agent") continue;
+          const dx = n.positionX - dropPos.x;
+          const dy = n.positionY - dropPos.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 120 && dist < minDist) {
+            minDist = dist;
+            closest = n;
+          }
+        }
+        if (!closest) return; // Agent가 아닌 곳 드롭 → 무시
+        // blockDefId: DRAG_MIME에 "type:key" 형태 — blockDef가 있으면 id 별도 MIME
+        const blockDefId = e.dataTransfer.getData("application/x-rf-blockdef-id");
+        if (!blockDefId) return; // 빈 블록(blockDef 없음)은 장착 불가
+        const agentConfig = closest.config as Partial<AgentConfig>;
+        const prevMounts: MountRef[] = agentConfig.mounts ?? [];
+        if (prevMounts.some((m) => m.blockDefId === blockDefId)) return; // 중복 방지
+        const nextMounts: MountRef[] = [...prevMounts, { blockDefId }];
+        updateAgentMounts(closest.id, nextMounts);
+        scheduleSave();
+        return;
+      }
+
       const pos = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
       const node = makeNode(
         pipelineId,
@@ -325,10 +406,18 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop }: Props
         Math.round(pos.x),
         Math.round(pos.y),
       );
-      addNode(node);
+      // 저장된 정의를 끌어온 경우 참조 노드(결정 1) — blockDefId 연결 +
+      // config는 빈 오버라이드. 이름만 인스턴스 소유로 복사. 빈 블록은 맨손.
+      const droppedDefId = e.dataTransfer.getData("application/x-rf-blockdef-id");
+      const droppedDef = droppedDefId ? blockDefMap[droppedDefId] : undefined;
+      if (droppedDefId && droppedDef) {
+        addNode({ ...node, name: droppedDef.name, blockDefId: droppedDefId, config: {} });
+      } else {
+        addNode(node);
+      }
       scheduleSave();
     },
-    [pipelineId, rf, addNode, scheduleSave, readOnly, onTrayDrop],
+    [pipelineId, rf, addNode, updateAgentMounts, scheduleSave, readOnly, onTrayDrop, blockDefMap],
   );
 
   const onDragOver = useCallback((e: React.DragEvent) => {
@@ -371,6 +460,7 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop }: Props
     <div
       className={styles.wrap}
       ref={wrapRef}
+      data-testid="canvas-ready"
       onDrop={onDrop}
       onDragOver={onDragOver}
     >

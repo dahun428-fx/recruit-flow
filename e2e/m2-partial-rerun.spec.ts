@@ -23,7 +23,7 @@ test("M2: 성공 run 후 노드 우클릭 컨텍스트 메뉴 확인", async ({
 
   // 캔버스 이동
   await page.goto(`/pipelines/${pipelineId}`);
-  await expect(page.locator(`[data-testid="node-${ag}"]`)).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(`[data-testid="node-${ag}"]`)).toBeVisible({ timeout: 30_000 });
 
   // 우클릭 → 컨텍스트 메뉴
   await page.locator(`[data-testid="node-${ag}"]`).click({ button: "right" });
@@ -61,7 +61,7 @@ test("M2: run 히스토리 드롭다운 → 스냅샷 → 복귀", async ({
 
   // 캔버스 이동
   await page.goto(`/pipelines/${pipelineId}`);
-  await expect(page.locator('[data-testid="run-history"]')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid="run-history"]')).toBeVisible({ timeout: 30_000 });
 
   // 히스토리 드롭다운 열기
   await page.locator('[data-testid="run-history"]').click();

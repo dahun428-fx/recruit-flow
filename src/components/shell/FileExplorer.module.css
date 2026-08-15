@@ -1,0 +1,594 @@
+/* 파일 탐색기 — 좌측 사이드바 */
+/* M4 후속: Windows 파일 탐색기 시각 언어 + 프로젝트 최상위 트리 */
+.explorer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.searchWrap {
+  flex: none;
+  padding: 8px 8px 6px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.search {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 5px 9px;
+  font: inherit;
+  font-size: 12px;
+  background: #fafbfc;
+  color: var(--text);
+  box-sizing: border-box;
+}
+.search:focus {
+  outline: none;
+  border-color: var(--c-agent);
+}
+
+.body {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* 섹션 */
+.section {
+  border-bottom: 1px solid var(--border-soft);
+  padding: 0 0 4px;
+}
+.section.dropTarget {
+  background: #eef1ff;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-faint);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.dropHint {
+  font-size: 9.5px;
+  font-weight: 400;
+  color: var(--text-faint);
+  margin-left: auto;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* ══ Windows 파일 탐색기 트리 ══ */
+
+/* 폴더 행 (펼침 가능한 항목) */
+.treeFolder {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 3px 8px 3px 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: 4px;
+  user-select: none;
+  box-sizing: border-box;
+}
+.treeFolder:hover {
+  background: #f2f4f8;
+}
+
+/* 현재 파이프라인 강조 */
+.treeCurrent {
+  background: #eef1ff;
+}
+.treeCurrent:hover {
+  background: #e4eaff;
+}
+
+/* 파일 행 (클릭 가능, 펼침 없음) */
+.treeFile {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 3px 8px 3px 6px;
+  font: inherit;
+  font-size: 11.5px;
+  color: #38404d;
+  cursor: pointer;
+  border-radius: 4px;
+  user-select: none;
+  box-sizing: border-box;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.treeFile:hover {
+  background: #f2f4f8;
+}
+
+/* 이름 */
+.treeName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+/* 굵은 이름 (현재 파이프라인) */
+.treeNameBold {
+  font-weight: 700;
+}
+
+/* 펼침 캐럿 */
+.treeCaret {
+  font-size: 9px;
+  color: var(--text-faint);
+  width: 10px;
+  flex: none;
+  text-align: center;
+}
+
+/* 폴더/파일 이모지 아이콘 */
+.treeFolderIcon {
+  flex: none;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.treeFileIcon {
+  flex: none;
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* 들여쓰기 레벨 (가이드라인 세로선 효과) */
+.treeChildren {
+  padding-left: 0;
+}
+
+.treeIndent1 {
+  padding-left: 18px !important;
+}
+.treeIndent2 {
+  padding-left: 34px !important;
+}
+.treeIndent3 {
+  padding-left: 50px !important;
+}
+
+/* 빈 항목 */
+.treeEmpty {
+  font-size: 11px;
+  color: var(--text-faint);
+  padding: 3px 8px;
+}
+
+/* 실행 기록 항목 — 색 도트 */
+.treeRunDot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.treeRunLive {
+  color: var(--c-agent);
+  font-weight: 600;
+}
+
+/* run 상태별 도트 색 */
+.runSt_running { background: var(--c-agent) !important; }
+.runSt_succeeded { background: var(--c-output) !important; }
+.runSt_failed { background: #d94040 !important; }
+.runSt_gate_failed { background: var(--c-gate) !important; }
+.runSt_waiting_human { background: var(--c-human) !important; }
+.runSt_cancelled { background: var(--text-faint) !important; }
+
+/* ══ 블록 타입 헤더 ══ */
+.typeHead {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 4px 10px 4px 12px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: 5px;
+  box-sizing: border-box;
+}
+.typeHead:hover {
+  background: #f2f4f8;
+}
+
+.caret {
+  font-size: 9px;
+  color: var(--text-faint);
+  width: 10px;
+  text-align: center;
+}
+
+.count {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  background: #f2f4f8;
+  border-radius: 10px;
+  padding: 0 5px;
+}
+
+/* ══ 블록 정의 항목 (draggable div) ══ */
+.defItem {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 3px 10px 3px 20px;
+  font: inherit;
+  font-size: 11.5px;
+  color: #38404d;
+  cursor: pointer;
+  border-radius: 5px;
+  user-select: none;
+  box-sizing: border-box;
+}
+.defItem:hover {
+  background: #f2f4f8;
+}
+
+/* mount 타입(skill/rule/tool) 항목 — 연한 색 */
+.mountOnlyItem {
+  opacity: 0.75;
+}
+
+/* 타입 색 도트 */
+.typeDot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 3px;
+}
+
+.itemDot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 3px;
+}
+
+.itemName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 들여쓰기 가이드선 (선택적) */
+.treeGuide {
+  display: none;
+}
+
+/* 이름 변경 인라인 input */
+.renameInput {
+  flex: 1;
+  border: 1px solid var(--c-agent);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font: inherit;
+  font-size: 11.5px;
+  outline: none;
+  min-width: 0;
+}
+
+/* ══ 새 블록 트레이 ══ */
+.trayBadge {
+  font-size: 9.5px;
+  font-weight: 700;
+  background: var(--c-agent);
+  color: #fff;
+  border-radius: 10px;
+  padding: 0 5px;
+  margin-left: 4px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.trayItem {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 3px 10px 3px 20px;
+  font-size: 11.5px;
+  color: #38404d;
+  cursor: pointer;
+  border-radius: 5px;
+  user-select: none;
+  box-sizing: border-box;
+  border-left: 2px solid var(--c-agent);
+  margin-left: 4px;
+}
+.trayItem:hover {
+  background: #f2f4f8;
+}
+
+.trayHighlight {
+  background: #e8f2ff;
+  border-left-color: #2470c2;
+  animation: trayPulse 0.5s ease;
+}
+
+@keyframes trayPulse {
+  0% { background: #c4dcf8; }
+  100% { background: #e8f2ff; }
+}
+
+.trayReject {
+  margin-left: auto;
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 1px 3px;
+  border-radius: 3px;
+  line-height: 1;
+}
+.trayReject:hover {
+  background: #f5e5e5;
+  color: #d94040;
+}
+
+/* ══ 문서 항목 ══ */
+.docItem {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 4px 10px 4px 14px;
+  font: inherit;
+  font-size: 12px;
+  color: #38404d;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 5px;
+  box-sizing: border-box;
+}
+.docItem:hover {
+  background: #f2f4f8;
+}
+
+.newDoc {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 4px 10px 4px 14px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--c-agent);
+  cursor: pointer;
+  font-weight: 600;
+  border-radius: 5px;
+}
+.newDoc:hover {
+  background: #eef1ff;
+}
+
+/* ══ 실행기록 (레거시, 프로젝트 트리로 흡수됨) ══ */
+.runInfo {
+  padding: 6px 14px 8px;
+}
+
+.runId {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-bottom: 2px;
+  font-family: monospace;
+}
+
+.runStatus {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+
+.st_running { color: var(--c-agent); }
+.st_succeeded { color: var(--c-output); }
+.st_failed { color: #d94040; }
+.st_gate_failed { color: var(--c-gate); }
+.st_waiting_human { color: var(--c-human); }
+.st_cancelled { color: var(--text-faint); }
+
+.runProgress {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.empty {
+  padding: 4px 14px 6px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* ══ 컨텍스트 메뉴 ══ */
+.contextMenu {
+  position: fixed;
+  z-index: 9999;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  min-width: 160px;
+  padding: 4px 0;
+}
+
+.menuItem {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 7px 14px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 0;
+}
+.menuItem:hover {
+  background: #f2f4f8;
+}
+.menuItemDanger {
+  color: #d1372e;
+}
+.menuItemDanger:hover {
+  background: #fff0f0;
+}
+
+.menuNote {
+  padding: 6px 14px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.menuDivider {
+  height: 1px;
+  background: var(--border-soft);
+  margin: 3px 0;
+}
+
+/* ══ 서브메뉴 ("만들기 ▸") ══ */
+.menuItemSubmenu {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 7px 14px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 0;
+  user-select: none;
+}
+.menuItemSubmenu:hover {
+  background: #f2f4f8;
+}
+
+.menuItemSubmenuLabel {
+  flex: 1;
+}
+
+.menuItemSubmenuArrow {
+  font-size: 9px;
+  color: var(--text-faint);
+  margin-left: 8px;
+}
+
+.submenu {
+  position: absolute;
+  left: 100%;
+  top: -4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  min-width: 140px;
+  padding: 4px 0;
+  z-index: 10000;
+}
+
+.submenuDot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 3px;
+  margin-right: 7px;
+  vertical-align: middle;
+}
+
+/* ══ 확인 팝업 ══ */
+.confirmPopup {
+  position: fixed;
+  z-index: 10000;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  padding: 12px 16px;
+  min-width: 200px;
+  max-width: 280px;
+}
+
+.confirmMsg {
+  font-size: 12.5px;
+  color: var(--text);
+  margin: 0 0 10px;
+  line-height: 1.5;
+}
+
+.confirmActions {
+  display: flex;
+  gap: 7px;
+  justify-content: flex-end;
+}
+
+.confirmBtn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 4px 13px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.confirmBtn:hover {
+  background: #f2f4f8;
+}
+.confirmBtnDanger {
+  background: #d1372e;
+  border-color: #d1372e;
+  color: #fff;
+}
+.confirmBtnDanger:hover {
+  background: #b82e26;
+}

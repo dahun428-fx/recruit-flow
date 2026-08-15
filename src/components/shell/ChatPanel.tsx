@@ -1,7 +1,7 @@
-// 채팅 독(M3) — pipeline SSE 구독, 입력창 활성, 5종 메시지 카드.
-// U1: 입력창 활성+전송(POST /chat). U2: pipeline SSE 상시 구독.
-// U4: card_block 카드+트레이 점프. U5: gap_question 인라인 답변·Human 승인.
-// U6: card_run started → store.initRun 연동은 PipelineView에서.
+// 우측 상주 채팅 패널 — 기존 ChatDock(하단)을 우측 세로 패널로 이전.
+// SSE 훅·메시지 카드 로직은 ChatDock에서 그대로 가져옴.
+// 접기 버튼(접으면 아이콘/얇은 바) + 미확인 배지(card_human 도착 시).
+// 자동 팝업 없음. 캔버스 Human 노드 클릭 → 펼치며 해당 카드 스크롤.
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -9,13 +9,8 @@ import { useCanvasStore } from "@/store/canvas";
 import { rememberActiveRun } from "@/hooks/useRunStream";
 import type { ChatMessage, RunState } from "@/lib/types";
 import { usePipelineStream } from "@/hooks/usePipelineStream";
-import styles from "./ChatDock.module.css";
-
-interface Props {
-  /** Human 노드 클릭 → 해당 카드로 스크롤할 nodeId */
-  scrollToNodeId?: string | null;
-  onScrollHandled?: () => void;
-}
+import { Resizer } from "@/components/shell/Resizer";
+import styles from "./ChatPanel.module.css";
 
 // ──────────────────────────────────────────────────────────
 // payload 타입들
@@ -63,22 +58,27 @@ interface AssistantPayload {
 }
 
 // ──────────────────────────────────────────────────────────
-// ChatDock 메인
+// ChatPanel 메인
 // ──────────────────────────────────────────────────────────
 
-export function ChatDock({ scrollToNodeId, onScrollHandled }: Props) {
+interface Props {
+  /** 패널 너비 px */
+  size: number;
+  /** Resizer의 onMouseDown 핸들러 */
+  onResizerMouseDown: (e: React.MouseEvent) => void;
+}
+
+export function ChatPanel({ size, onResizerMouseDown }: Props) {
   const pipelineId = useCanvasStore((s) => s.pipelineId);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  // messageId → 스트리밍 중 텍스트 (chat_delta 누적)
   const [streamingMap, setStreamingMap] = useState<Record<string, string>>({});
   const [collapsed, setCollapsed] = useState(false);
+  const [unreadHuman, setUnreadHuman] = useState(0);
   const [inputText, setInputText] = useState("");
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const inputRef = useRef<HTMLInputElement>(null);
-
-  // 스트리밍 메시지 ID(가장 최근 assistant 스트리밍)
   const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
 
   // pipeline SSE 구독
@@ -86,7 +86,6 @@ export function ChatDock({ scrollToNodeId, onScrollHandled }: Props) {
     onMessages: (msgs) => {
       setMessages(msgs);
     },
-    // 트레이 변경 통지 → Palette가 재조회(기존 rf:* 커스텀 이벤트 관례).
     onBlockDefChanged: () => {
       window.dispatchEvent(new CustomEvent("rf:blockDefsChanged"));
     },
@@ -106,11 +105,9 @@ export function ChatDock({ scrollToNodeId, onScrollHandled }: Props) {
         if (prev.some((m) => m.id === msg.id)) return prev;
         return [...prev, msg];
       });
-      // 확정되면 스트리밍 버퍼 제거
       if (msg.kind === "assistant") {
         setStreamingMap((prev) => {
           const next = { ...prev };
-          // assistant 확정 시 모든 streaming 버퍼 정리
           for (const key of Object.keys(next)) {
             delete next[key];
           }
@@ -124,13 +121,16 @@ export function ChatDock({ scrollToNodeId, onScrollHandled }: Props) {
         if (prev.some((m) => m.id === msg.id)) return prev;
         return [...prev, msg];
       });
+      // 접혀 있고 card_human이면 미확인 배지 증가
+      if (msg.kind === "card_human" && collapsed) {
+        setUnreadHuman((v) => v + 1);
+      }
       // U6: card_run(started) → store initRun + useRunStream 기동
       if (msg.kind === "card_run") {
         const p = msg.payload as RunCardPayload;
         const runId = msg.runId ?? p.runId;
         if (p.event === "started" && runId && pipelineId) {
           rememberActiveRun(pipelineId, runId);
-          // RunState를 REST로 조회해 initRun
           void fetch(`/api/runs/${runId}`)
             .then((r) => r.json())
             .then((state: RunState) => {
@@ -182,6 +182,7 @@ export function ChatDock({ scrollToNodeId, onScrollHandled }: Props) {
         const el = cardRefs.current.get(targetMsg.id);
         if (el) {
           setCollapsed(false);
+          setUnreadHuman(0);
           el.scrollIntoView({ behavior: "smooth", block: "center" });
           el.classList.add(styles.highlight);
           setTimeout(() => el.classList.remove(styles.highlight), 1500);
@@ -191,14 +192,7 @@ export function ChatDock({ scrollToNodeId, onScrollHandled }: Props) {
     [messages],
   );
 
-  useEffect(() => {
-    if (!scrollToNodeId) return;
-    scrollToNode(scrollToNodeId);
-    onScrollHandled?.();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scrollToNodeId]);
-
-  // 전역 이벤트 수신
+  // 전역 이벤트 수신 (Human 노드 클릭)
   useEffect(() => {
     function onHumanClick(e: Event) {
       const { nodeId } = (e as CustomEvent<{ nodeId: string }>).detail;
@@ -207,6 +201,12 @@ export function ChatDock({ scrollToNodeId, onScrollHandled }: Props) {
     window.addEventListener("rf:humanNodeClick", onHumanClick);
     return () => window.removeEventListener("rf:humanNodeClick", onHumanClick);
   }, [scrollToNode]);
+
+  // 패널 펼칠 때 미확인 초기화
+  const expand = useCallback(() => {
+    setCollapsed(false);
+    setUnreadHuman(0);
+  }, []);
 
   // U1: 전송
   const sendMessage = useCallback(async () => {
@@ -221,7 +221,7 @@ export function ChatDock({ scrollToNodeId, onScrollHandled }: Props) {
         body: JSON.stringify({ text }),
       });
     } catch {
-      // 무시(fire-and-forget — 응답은 SSE로 수신)
+      // 무시(fire-and-forget)
     } finally {
       setSending(false);
       setTimeout(() => inputRef.current?.focus(), 0);
@@ -238,75 +238,93 @@ export function ChatDock({ scrollToNodeId, onScrollHandled }: Props) {
     [sendMessage],
   );
 
-  // 모든 렌더할 메시지(확정) + 스트리밍 중 assistant
-  const renderedMessages = messages;
-  // 스트리밍 중 assistant 가상 메시지
   const streamingText = streamingMsgId ? (streamingMap[streamingMsgId] ?? "") : null;
 
-  return (
-    <div
-      className={`${styles.dock} ${collapsed ? styles.collapsed : ""}`}
-    >
-      {/* 헤더 */}
-      <div className={styles.head}>
-        <span>채팅 · {pipelineId ? "파이프라인" : "–"}</span>
-        <button onClick={() => setCollapsed((v) => !v)}>
-          {collapsed ? "펼치기 ▴" : "접기 ▾"}
+  // 접힌 상태: 얇은 바(리사이저 없음)
+  if (collapsed) {
+    return (
+      <div className={styles.collapsedBar}>
+        <button
+          className={styles.expandBtn}
+          onClick={expand}
+          title="채팅 패널 펼치기"
+        >
+          ◀
         </button>
+        <div className={styles.collapsedLabel}>채팅</div>
+        {unreadHuman > 0 && (
+          <div className={styles.unreadBadge}>{unreadHuman}</div>
+        )}
       </div>
+    );
+  }
 
-      {!collapsed && (
-        <>
-          <div className={styles.stream}>
-            {renderedMessages.length === 0 && !streamingText && (
-              <div className={styles.empty}>
-                블록을 만들어 달라고 하거나, &apos;작성해줘&apos;로 실행을 시작해 보세요.
-              </div>
-            )}
-            {renderedMessages.map((msg) => (
-              <MessageCard
-                key={msg.id}
-                msg={msg}
-                cardRef={(el) => {
-                  if (el) cardRefs.current.set(msg.id, el);
-                  else cardRefs.current.delete(msg.id);
-                }}
-              />
-            ))}
-            {/* 스트리밍 중 assistant 버블 */}
-            {streamingText !== null && (
-              <div className={`${styles.card} ${styles.assistant}`}>
-                <div className={styles.kind}>챗봇</div>
-                <div className={styles.text}>
-                  {streamingText}
-                  <span className={styles.cursor} />
-                </div>
-              </div>
-            )}
-            <div ref={bottomRef} />
-          </div>
-          {/* U1: 입력창 활성 */}
-          <div className={styles.input}>
-            <input
-              ref={inputRef}
-              placeholder="블록을 만들어 달라고 하거나, '작성해줘'로 실행"
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={onKeyDown}
-              disabled={sending || !pipelineId}
-              data-testid="chat-input"
+  return (
+    <>
+      <Resizer vertical onMouseDown={onResizerMouseDown} />
+      <div className={styles.panel} style={{ width: size }}>
+        {/* 헤더 */}
+        <div className={styles.head}>
+          <span className={styles.headTitle}>채팅</span>
+          <button
+            className={styles.collapseBtn}
+            onClick={() => setCollapsed(true)}
+            title="채팅 패널 접기"
+          >
+            접기 ▶
+          </button>
+        </div>
+
+        {/* 메시지 스트림 */}
+        <div className={styles.stream}>
+          {messages.length === 0 && !streamingText && (
+            <div className={styles.empty}>
+              블록을 만들어 달라고 하거나, &apos;작성해줘&apos;로 실행을 시작해 보세요.
+            </div>
+          )}
+          {messages.map((msg) => (
+            <MessageCard
+              key={msg.id}
+              msg={msg}
+              cardRef={(el) => {
+                if (el) cardRefs.current.set(msg.id, el);
+                else cardRefs.current.delete(msg.id);
+              }}
             />
-            <button
-              onClick={() => void sendMessage()}
-              disabled={sending || !inputText.trim() || !pipelineId}
-              data-testid="chat-send"
-            >
-              {sending ? "전송 중…" : "전송"}
-            </button>
-          </div>
-        </>
-      )}
-    </div>
+          ))}
+          {streamingText !== null && (
+            <div className={`${styles.card} ${styles.assistant}`}>
+              <div className={styles.kind}>챗봇</div>
+              <div className={styles.text}>
+                {streamingText}
+                <span className={styles.cursor} />
+              </div>
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+
+        {/* 입력창 */}
+        <div className={styles.input}>
+          <input
+            ref={inputRef}
+            placeholder="블록을 만들어 달라고 하거나, '작성해줘'로 실행"
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            onKeyDown={onKeyDown}
+            disabled={sending || !pipelineId}
+            data-testid="chat-input"
+          />
+          <button
+            onClick={() => void sendMessage()}
+            disabled={sending || !inputText.trim() || !pipelineId}
+            data-testid="chat-send"
+          >
+            {sending ? "전송 중…" : "전송"}
+          </button>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -337,10 +355,6 @@ function MessageCard({
   }
 }
 
-// ──────────────────────────────────────────────────────────
-// 사용자 텍스트 카드
-// ──────────────────────────────────────────────────────────
-
 function UserCard({
   msg,
   cardRef,
@@ -350,15 +364,16 @@ function UserCard({
 }) {
   const p = msg.payload as UserPayload;
   return (
-    <div ref={cardRef} className={`${styles.card} ${styles.user}`} data-testid={`chat-msg-${msg.id}`} data-kind="user">
+    <div
+      ref={cardRef}
+      className={`${styles.card} ${styles.user}`}
+      data-testid={`chat-msg-${msg.id}`}
+      data-kind="user"
+    >
       <div className={styles.text}>{p.text}</div>
     </div>
   );
 }
-
-// ──────────────────────────────────────────────────────────
-// 챗봇 응답 카드 (확정)
-// ──────────────────────────────────────────────────────────
 
 function AssistantCard({
   msg,
@@ -369,16 +384,17 @@ function AssistantCard({
 }) {
   const p = msg.payload as AssistantPayload;
   return (
-    <div ref={cardRef} className={`${styles.card} ${styles.assistant}`} data-testid={`chat-msg-${msg.id}`} data-kind="assistant">
+    <div
+      ref={cardRef}
+      className={`${styles.card} ${styles.assistant}`}
+      data-testid={`chat-msg-${msg.id}`}
+      data-kind="assistant"
+    >
       <div className={styles.kind}>챗봇</div>
       <div className={styles.text}>{p.text}</div>
     </div>
   );
 }
-
-// ──────────────────────────────────────────────────────────
-// run 보고 카드
-// ──────────────────────────────────────────────────────────
 
 function RunCard({
   msg,
@@ -393,17 +409,24 @@ function RunCard({
   const isStart = payload.event === "started";
   const isFailed = payload.event === "failed";
 
-  const cardClass = isGateFail || isFailed
-    ? `${styles.card} ${styles.gatefail}`
-    : `${styles.card} ${styles.run}`;
+  const cardClass =
+    isGateFail || isFailed
+      ? `${styles.card} ${styles.gatefail}`
+      : `${styles.card} ${styles.run}`;
 
-  const title = payload.title ?? (
-    isStart ? "RUN 시작" :
-    isEnd ? "RUN 완료" :
-    payload.event === "cancelled" ? "RUN 취소" :
-    isFailed ? "RUN 실패" :
-    isGateFail ? "게이트 실패" : payload.event
-  );
+  const title =
+    payload.title ??
+    (isStart
+      ? "RUN 시작"
+      : isEnd
+      ? "RUN 완료"
+      : payload.event === "cancelled"
+      ? "RUN 취소"
+      : isFailed
+      ? "RUN 실패"
+      : isGateFail
+      ? "게이트 실패"
+      : payload.event);
 
   let body = "";
   if (isStart) {
@@ -413,14 +436,21 @@ function RunCard({
   } else if (payload.event === "cancelled") {
     body = "중단됨";
   } else if (isGateFail) {
-    const scoreText = payload.finalScore ?? (payload.score != null ? String(payload.score) : "?");
+    const scoreText =
+      payload.finalScore ??
+      (payload.score != null ? String(payload.score) : "?");
     body = `${payload.gateName ?? "Gate"} · ${payload.loops ?? "?"}회차 · score ${scoreText}`;
   } else if (isFailed) {
     body = payload.reason ?? "노드 실패";
   }
 
   return (
-    <div ref={cardRef} className={cardClass} data-testid={`chat-msg-${msg.id}`} data-kind="card_run">
+    <div
+      ref={cardRef}
+      className={cardClass}
+      data-testid={`chat-msg-${msg.id}`}
+      data-kind="card_run"
+    >
       <div className={styles.kind}>{title}</div>
       {body && <div>{body}</div>}
       {isEnd && payload.htmlArtifactId && (
@@ -428,7 +458,10 @@ function RunCard({
           <button
             className={styles.primary}
             onClick={() =>
-              window.open(`/api/artifacts/${payload.htmlArtifactId}/download`, "_blank")
+              window.open(
+                `/api/artifacts/${payload.htmlArtifactId}/download`,
+                "_blank",
+              )
             }
           >
             ⬇ HTML 다운로드
@@ -439,10 +472,6 @@ function RunCard({
   );
 }
 
-// ──────────────────────────────────────────────────────────
-// Human 대기 카드 (U5: gap_question 인라인 답변 + waiting 승인)
-// ──────────────────────────────────────────────────────────
-
 function HumanCard({
   msg,
   cardRef,
@@ -451,7 +480,6 @@ function HumanCard({
   cardRef: (el: HTMLDivElement | null) => void;
 }) {
   const payload = msg.payload as HumanCardPayload;
-  // nodeRunId는 ChatMessage.nodeRunId(DB에서 직접)가 우선, 없으면 payload 폴백
   const nodeRunId = msg.nodeRunId ?? payload.nodeRunId;
   const event = payload.event;
 
@@ -463,7 +491,6 @@ function HumanCard({
   const [editContent, setEditContent] = useState(payload.primaryContent ?? "");
   const [editing, setEditing] = useState(false);
 
-  // gap_question → POST answer
   const submitAnswer = useCallback(async () => {
     if (!nodeRunId || !answerText.trim()) return;
     setAnswering(true);
@@ -479,43 +506,59 @@ function HumanCard({
     }
   }, [nodeRunId, answerText]);
 
-  // waiting → POST approve
-  const approve = useCallback(async (editedContent?: string) => {
-    if (!nodeRunId) return;
-    setApproving(true);
-    try {
-      const res = await fetch(`/api/node-runs/${nodeRunId}/approve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(editedContent ? { editedContent } : {}),
-      });
-      if (res.ok) setApproved(true);
-    } finally {
-      setApproving(false);
-    }
-  }, [nodeRunId]);
+  const approve = useCallback(
+    async (editedContent?: string) => {
+      if (!nodeRunId) return;
+      setApproving(true);
+      try {
+        const res = await fetch(`/api/node-runs/${nodeRunId}/approve`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(editedContent ? { editedContent } : {}),
+        });
+        if (res.ok) setApproved(true);
+      } finally {
+        setApproving(false);
+      }
+    },
+    [nodeRunId],
+  );
 
   const openSidePanel = useCallback(() => {
     if (payload.nodeId) {
       useCanvasStore.getState().select(payload.nodeId);
+      // M4: 노드 탭 열기 — TabEditor가 수신해 노드 편집기 탭을 연다.
+      window.dispatchEvent(new CustomEvent("rf:humanNodeClick", { detail: { nodeId: payload.nodeId } }));
     }
   }, [payload.nodeId]);
 
-  // approved 이벤트 — 이미 승인됨 표시
   if (event === "approved") {
     return (
-      <div ref={cardRef} className={`${styles.card} ${styles.human}`} data-testid={`chat-msg-${msg.id}`} data-kind="card_human">
-        <div className={styles.kind}>사람 대기 — {payload.nodeName ?? "Human 노드"}</div>
+      <div
+        ref={cardRef}
+        className={`${styles.card} ${styles.human}`}
+        data-testid={`chat-msg-${msg.id}`}
+        data-kind="card_human"
+      >
+        <div className={styles.kind}>
+          사람 대기 — {payload.nodeName ?? "Human 노드"}
+        </div>
         <div className={styles.approvedBadge}>승인 완료</div>
       </div>
     );
   }
 
-  // gap_question — 인라인 답변 입력창
   if (event === "gap_question") {
     return (
-      <div ref={cardRef} className={`${styles.card} ${styles.human}`} data-testid={`chat-msg-${msg.id}`} data-kind="card_human">
-        <div className={styles.kind}>갭 인터뷰 — {payload.nodeName ?? "Agent"}</div>
+      <div
+        ref={cardRef}
+        className={`${styles.card} ${styles.human}`}
+        data-testid={`chat-msg-${msg.id}`}
+        data-kind="card_human"
+      >
+        <div className={styles.kind}>
+          갭 인터뷰 — {payload.nodeName ?? "Agent"}
+        </div>
         {payload.question && (
           <div className={styles.instruction}>{payload.question}</div>
         )}
@@ -548,11 +591,17 @@ function HumanCard({
     );
   }
 
-  // waiting (기본) — 승인·편집
   const allowEdit = payload.allowEdit ?? false;
   return (
-    <div ref={cardRef} className={`${styles.card} ${styles.human}`} data-testid={`chat-msg-${msg.id}`} data-kind="card_human">
-      <div className={styles.kind}>사람 대기 — {payload.nodeName ?? "Human 노드"}</div>
+    <div
+      ref={cardRef}
+      className={`${styles.card} ${styles.human}`}
+      data-testid={`chat-msg-${msg.id}`}
+      data-kind="card_human"
+    >
+      <div className={styles.kind}>
+        사람 대기 — {payload.nodeName ?? "Human 노드"}
+      </div>
       {payload.instruction && (
         <div className={styles.instruction}>{payload.instruction}</div>
       )}
@@ -594,10 +643,6 @@ function HumanCard({
   );
 }
 
-// ──────────────────────────────────────────────────────────
-// 블록 생성 카드 (U4)
-// ──────────────────────────────────────────────────────────
-
 function BlockCard({
   msg,
   cardRef,
@@ -607,7 +652,6 @@ function BlockCard({
 }) {
   const payload = msg.payload as BlockCardPayload;
 
-  // 트레이 항목 하이라이트(U4: 커스텀 이벤트 — Palette에서 구독)
   const jumpToTray = useCallback(() => {
     window.dispatchEvent(
       new CustomEvent("rf:trayHighlight", {
@@ -617,7 +661,12 @@ function BlockCard({
   }, [payload.blockDefId]);
 
   return (
-    <div ref={cardRef} className={`${styles.card} ${styles.block}`} data-testid={`chat-msg-${msg.id}`} data-kind="card_block">
+    <div
+      ref={cardRef}
+      className={`${styles.card} ${styles.block}`}
+      data-testid={`chat-msg-${msg.id}`}
+      data-kind="card_block"
+    >
       <div className={styles.kind}>블록 생성 — 새 블록 트레이에 담김</div>
       <div className={styles.blockName}>
         <span className={styles.blockType}>{payload.type?.toUpperCase()}</span>

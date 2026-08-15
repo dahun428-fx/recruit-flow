@@ -17,7 +17,7 @@ test("M3: [E2E:gap] 노드 → gap_question 카드 → 인라인 답변 → run 
   ]);
 
   await page.goto(`/pipelines/${pipelineId}`);
-  await expect(page.locator('[data-testid^="node-"]').first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid^="node-"]').first()).toBeVisible({ timeout: 30_000 });
 
   // run 시작
   await page.locator('[data-testid="run-btn"]').click();

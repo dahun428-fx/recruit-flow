@@ -1,6 +1,6 @@
 // 팔레트(Q7·Q10-B) — 2계층 트리 + 새 블록 트레이(M3).
-// 하위 항목: 드래그 = 캔버스 추가(주 동선) · 더블클릭 = 자동 배치 · 클릭 = 설명 팝오버.
-// 항목별 활성/비활성 토글(hover 시 노출, 비활성 시 상시).
+// 하위 항목: 드래그 = 캔버스 추가/Agent 장착(주 동선) · 더블클릭 = 자동 배치 · 클릭 = 설명 팝오버.
+// M4: enabled 토글 제거. skill/rule/tool은 Agent에만 드래그 장착(캔버스 단독 배치 불가).
 // U3: 새 블록 트레이 구획 — tray===true 항목, 드래그/더블클릭 승인(tray:false) + X 거절(DELETE).
 // U4: rf:trayHighlight 이벤트 수신 시 해당 항목 하이라이트.
 // U5: 항목 우클릭 = Notion 식 컨텍스트 메뉴 (스펙 §5).
@@ -29,14 +29,14 @@ const ALL_TYPES: NodeType[] = [
 ];
 
 const TYPE_LABEL: Record<NodeType, string> = {
-  agent: "Agent",
-  input: "Input",
-  output: "Output",
-  gate: "Gate",
-  human: "Human",
-  skill: "Skill",
-  rule: "Rule",
-  tool: "Tool",
+  agent: "에이전트",
+  input: "자료",
+  output: "완성본",
+  gate: "관문",
+  human: "내 검토",
+  skill: "기술",
+  rule: "규칙",
+  tool: "도구",
 };
 
 const TYPE_COLOR: Record<NodeType, string> = {
@@ -68,7 +68,8 @@ interface PaletteItem {
   label: string;
   tip: string;
   blockDef?: BlockDef; // 저장된 정의이면 있음
-  enabled: boolean;
+  /** M4: skill/rule/tool은 팔레트에서 드래그 장착만 가능(캔버스 단독 배치 불가) */
+  mountOnly: boolean;
 }
 
 /** 컨텍스트 메뉴 섹션 구분. */
@@ -81,7 +82,6 @@ interface ContextMenu {
   y: number;
   item?: PaletteItem;   // empty/library 항목
   trayDef?: BlockDef;   // tray 항목
-  enabled?: boolean;    // 현재 활성 상태 (library/empty)
 }
 
 /** 확인 팝업 state. */
@@ -112,8 +112,6 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
     y: number;
   } | null>(null);
   const [blockDefs, setBlockDefs] = useState<BlockDef[]>([]);
-  // 로컬 enabled 오버라이드(API에서 온 값 + 토글 변경)
-  const [enabledMap, setEnabledMap] = useState<Record<string, boolean>>({});
   // U4: 트레이 항목 하이라이트
   const [highlightTrayId, setHighlightTrayId] = useState<string | null>(null);
   // U5: 컨텍스트 메뉴
@@ -134,9 +132,6 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
       .then((r) => r.json())
       .then((defs: BlockDef[]) => {
         setBlockDefs(defs);
-        const map: Record<string, boolean> = {};
-        for (const d of defs) map[d.id] = d.enabled;
-        setEnabledMap(map);
       })
       .catch(() => {});
   }, []);
@@ -234,27 +229,18 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
     });
   }
 
-  function toggleEnabled(item: PaletteItem, e: React.MouseEvent) {
-    e.stopPropagation();
-    if (!item.blockDef) return;
-    const newVal = !(enabledMap[item.blockDef.id] ?? item.blockDef.enabled);
-    setEnabledMap((m) => ({ ...m, [item.blockDef!.id]: newVal }));
-    fetch(`/api/block-defs/${item.blockDef.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: newVal }),
-    }).catch(() => {});
-  }
-
   // 타입별 팔레트 항목 구성(tray 제외)
   function getItems(type: NodeType): PaletteItem[] {
+    const isMountType = (["skill", "rule", "tool"] as NodeType[]).includes(type);
     const items: PaletteItem[] = [];
     items.push({
       key: `empty-${type}`,
       type,
       label: `빈 ${TYPE_LABEL[type]}`,
-      tip: TYPE_TIP[type],
-      enabled: true,
+      tip: isMountType
+        ? `${TYPE_TIP[type]} Agent 위로 드래그해 장착하세요.`
+        : TYPE_TIP[type],
+      mountOnly: isMountType,
     });
     const defs = blockDefs.filter((d) => d.type === type && !d.tray);
     for (const d of defs) {
@@ -264,7 +250,7 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
         label: d.name,
         tip: d.description || TYPE_TIP[type],
         blockDef: d,
-        enabled: enabledMap[d.id] ?? d.enabled,
+        mountOnly: isMountType,
       });
     }
     return items;
@@ -342,33 +328,16 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
     setConfirm(null);
 
     const { x, y } = clampMenuPos(e.clientX, e.clientY);
-    const enabled =
-      item?.blockDef
-        ? (enabledMap[item.blockDef.id] ?? item.blockDef.enabled)
-        : item?.enabled;
 
-    setContextMenu({ section, x, y, item, trayDef, enabled });
+    setContextMenu({ section, x, y, item, trayDef });
   }
 
   // ─── U5: 메뉴 액션 ────────────────────────────────────────────────
 
-  /** 캔버스에 추가 (빈 블록·라이브러리 공통) */
+  /** 캔버스에 추가 (빈 블록·라이브러리 공통). skill/rule/tool은 드래그 장착 전용 → 무시. */
   function menuAddToCanvas(item: PaletteItem) {
-    if (!item.enabled) return;
+    if (item.mountOnly) return; // M4: mount 타입은 단독 배치 불가
     onAddBlock(item.type, item.blockDef);
-    setContextMenu(null);
-  }
-
-  /** 활성/비활성 토글 (라이브러리 전용) */
-  function menuToggleEnabled(item: PaletteItem) {
-    if (!item.blockDef) return;
-    const newVal = !(enabledMap[item.blockDef.id] ?? item.blockDef.enabled);
-    setEnabledMap((m) => ({ ...m, [item.blockDef!.id]: newVal }));
-    fetch(`/api/block-defs/${item.blockDef.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: newVal }),
-    }).catch(() => {});
     setContextMenu(null);
   }
 
@@ -470,21 +439,22 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
             {isOpen && (
               <div className={styles.children}>
                 {items.map((item) => {
-                  const isEnabled = item.enabled;
                   const isLibrary = !!item.blockDef;
                   const section: ContextSection = isLibrary ? "library" : "empty";
                   const isRenaming = isLibrary && renamingId === item.blockDef?.id;
+                  // mount 타입 항목은 Agent 위 드래그 장착만 가능
+                  const isMountItem = item.mountOnly;
 
                   return (
                     <div
                       key={item.key}
                       className={`${styles.item} ${
                         selected === item.key ? styles.selected : ""
-                      } ${!isEnabled ? styles.off : ""}`}
+                      } ${isMountItem ? styles.mountOnly : ""}`}
                       data-testid={`palette-item-${item.key}`}
-                      draggable={isEnabled && !isRenaming}
+                      draggable={!isRenaming}
                       onDragStart={
-                        isEnabled && !isRenaming
+                        !isRenaming
                           ? (e) => {
                               e.dataTransfer.setData(DRAG_MIME, `${type}:${item.key}`);
                               if (item.blockDef) {
@@ -504,7 +474,8 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
                       onDoubleClick={(e) => {
                         if (isRenaming) return;
                         e.stopPropagation();
-                        if (!isEnabled) return;
+                        // M4: mount 타입은 더블클릭 캔버스 추가 불가
+                        if (isMountItem) return;
                         onAddBlock(type, item.blockDef);
                         setPopover(null);
                         setSelected(null);
@@ -540,21 +511,6 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
                         />
                       ) : (
                         <span className={styles.name}>{item.label}</span>
-                      )}
-                      {item.blockDef && !isRenaming && (
-                        <label
-                          className={styles.miniSwitch}
-                          onClick={toggleEnabled.bind(null, item)}
-                          title={isEnabled ? "비활성화" : "활성화"}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isEnabled}
-                            onChange={() => {}}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                          <span className={styles.tr} />
-                        </label>
                       )}
                     </div>
                   );
@@ -670,8 +626,10 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
           </h4>
           <p>{popover.item.tip}</p>
           <div className={styles.hint}>
-            <b>더블클릭</b> 또는 <b>드래그</b>로 캔버스에 추가
-            {popover.item.blockDef && " · 행의 토글로 활성/비활성"}
+            {popover.item.mountOnly
+              ? <><b>드래그</b>해서 Agent 카드 위에 올리면 장착됩니다</>
+              : <><b>더블클릭</b> 또는 <b>드래그</b>로 캔버스에 추가</>
+            }
           </div>
         </div>
       )}
@@ -699,24 +657,19 @@ export function Palette({ onAddBlock, onApproveTray }: Props) {
           {/* ── 라이브러리 메뉴 ── */}
           {contextMenu.section === "library" && contextMenu.item && (
             <>
-              <button
-                className={`${styles.menuItem} ${
-                  !contextMenu.enabled ? styles.menuItemDisabled : ""
-                }`}
-                onClick={() => {
-                  if (!contextMenu.enabled) return;
-                  menuAddToCanvas(contextMenu.item!);
-                }}
-              >
-                캔버스에 추가
-              </button>
+              {/* mount 타입은 캔버스 단독 배치 불가 — 항목 숨김 */}
+              {!contextMenu.item.mountOnly && (
+                <button
+                  className={styles.menuItem}
+                  onClick={() => menuAddToCanvas(contextMenu.item!)}
+                >
+                  캔버스에 추가
+                </button>
+              )}
+              {contextMenu.item.mountOnly && (
+                <div className={styles.menuNote}>Agent 위로 드래그해 장착</div>
+              )}
               <div className={styles.menuDivider} />
-              <button
-                className={styles.menuItem}
-                onClick={() => menuToggleEnabled(contextMenu.item!)}
-              >
-                {contextMenu.enabled ? "비활성화" : "활성화"}
-              </button>
               <button
                 className={styles.menuItem}
                 onClick={() =>

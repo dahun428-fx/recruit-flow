@@ -168,6 +168,24 @@ class RunEventBus {
     this.emitToAllPipelines({ type: "block_def", action, blockDefId, blockDef });
   }
 
+  /**
+   * 문서 변경 통지(M4 결정 6·4-G). documents도 pipeline_id 없는 전역 테이블이므로
+   * 열려 있는 모든 pipeline 채널에 브로드캐스트(block_def 선례를 그대로 복제).
+   * 챗봇 edit_document·register_document, 사람 편집(문서 CRUD 라우트) 모두 이 함수를 호출한다.
+   */
+  emitDocumentChanged(
+    action: "created" | "updated" | "deleted",
+    documentId: string,
+    version?: number,
+  ): void {
+    this.emitToAllPipelines({
+      type: "document_changed",
+      action,
+      documentId,
+      ...(version !== undefined ? { version } : {}),
+    });
+  }
+
   /** 구독자 존재 여부(디버그·테스트용). */
   hasSubscribers(runId: string): boolean {
     return (this.subscribers.get(runId)?.size ?? 0) > 0;

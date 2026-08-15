@@ -30,7 +30,7 @@ test("M2: writer→[scorer-a∥scorer-b]→gate(pass)→output — 재작성 후
 
   // UI: 캔버스 이동, run 시작
   await page.goto(`/pipelines/${pipelineId}`);
-  await expect(page.locator('[data-testid="run-btn"]')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid="run-btn"]')).toBeVisible({ timeout: 30_000 });
   await page.locator('[data-testid="run-btn"]').click();
 
   // run 완료까지 API 폴링

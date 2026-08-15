@@ -3,7 +3,7 @@
 // **존재 자체를 만들지 않는다**. 챗봇이 그래프에 직접 손댈 방법이 없다.
 //
 // 읽기 4종: list_block_defs · get_graph(요약만, 결정 G) · list_documents · get_document.
-// 쓰기 3종(결정 5=add만): add_block(항상 tray=true) · register_document · trigger_run.
+// 쓰기 4종: add_block(항상 tray=true) · register_document · edit_document(부분 치환) · trigger_run.
 // **금지(미제공)**: add_edge/wire/connect/delete_node/update_node/move_node/delete_edge.
 
 import {
@@ -37,6 +37,7 @@ export const CHATBOT_TOOL_NAMES = [
   "get_document",
   "add_block",
   "register_document",
+  "edit_document",
   "trigger_run",
 ] as const;
 
@@ -174,9 +175,9 @@ export function buildChatbotMcp(
         if (defs.length === 0) return textResult("저장된 블록이 없습니다.");
         const lines = defs.map(
           (d) =>
-            `- [${d.type}] ${d.name}${d.tray ? " (트레이 대기)" : ""}${
-              d.enabled ? "" : " (비활성)"
-            }: ${d.description || "(설명 없음)"}`,
+            `- [${d.type}] ${d.name}${d.tray ? " (트레이 대기)" : ""}: ${
+              d.description || "(설명 없음)"
+            }`,
         );
         return textResult(lines.join("\n"));
       },
@@ -300,12 +301,60 @@ export function buildChatbotMcp(
         if (existing) {
           const updated = addDocumentVersion(existing.id, args.content, "llm", args.note);
           if (!updated) return textResult(`문서 갱신에 실패했습니다: ${args.name}`);
+          eventBus.emitDocumentChanged("updated", updated.id, updated.currentVersion);
           return textResult(
             `문서 '${updated.name}'을 v${updated.currentVersion}으로 갱신했습니다.`,
           );
         }
         const created = createDocument(args.name, args.content, "llm", args.note);
+        eventBus.emitDocumentChanged("created", created.id, created.currentVersion);
         return textResult(`문서 '${created.name}'을 새로 등록했습니다(v1).`);
+      },
+    ),
+  );
+
+  tools.push(
+    tool(
+      "edit_document",
+      "기존 문서의 일부를 부분 치환한다. 전문 재작성이 필요 없다 — old_string(바꿀 원문)과 " +
+        "new_string(대체 텍스트)만 넘긴다. old_string은 문서 안에서 **정확히 한 곳**에만 " +
+        "일치해야 한다; 여러 곳에 걸리면 더 긴 문맥을 포함해 다시 시도하라. 치환 후 새 버전이 저장된다.",
+      {
+        name: z.string().describe("편집할 문서 이름"),
+        old_string: z.string().describe("바꿀 원문(문서 안에서 정확히 1곳에만 일치해야 함)"),
+        new_string: z.string().describe("대체 텍스트"),
+        note: z.string().optional().describe("버전 노트"),
+      },
+      async (args) => {
+        const existing = listDocuments().find((d) => d.name === args.name);
+        if (!existing) return textResult(`문서를 찾을 수 없습니다: ${args.name}`);
+        const doc = getDocument(existing.id);
+        if (!doc) return textResult(`문서를 찾을 수 없습니다: ${args.name}`);
+        if (args.old_string === "") {
+          return textResult("old_string이 비어 있습니다. 바꿀 원문을 지정하세요.");
+        }
+        // 정확히 1곳만 성공(0곳=찾을 수 없음, 2곳+=더 긴 문맥 필요).
+        const parts = doc.content.split(args.old_string);
+        const matches = parts.length - 1;
+        if (matches === 0) {
+          return textResult(
+            `old_string을 문서 '${args.name}'에서 찾을 수 없습니다. 원문을 정확히 복사했는지 확인하세요.`,
+          );
+        }
+        if (matches > 1) {
+          return textResult(
+            `old_string이 문서 '${args.name}'의 ${matches}곳에 일치합니다. ` +
+              `정확히 한 곳만 지목하도록 앞뒤 문맥을 더 길게 포함해 다시 시도하세요.`,
+          );
+        }
+        const newContent = parts.join(args.new_string);
+        const updated = addDocumentVersion(existing.id, newContent, "llm", args.note);
+        if (!updated) return textResult(`문서 갱신에 실패했습니다: ${args.name}`);
+        eventBus.emitDocumentChanged("updated", updated.id, updated.currentVersion);
+        return textResult(
+          `문서 '${updated.name}'을 v${updated.currentVersion}으로 편집했습니다. ` +
+            `1곳을 치환했습니다.`,
+        );
       },
     ),
   );

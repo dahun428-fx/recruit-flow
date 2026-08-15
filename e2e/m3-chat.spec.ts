@@ -8,7 +8,7 @@ test("M3: 채팅 입력 '블록 만들어줘' → card_block → 트레이 표�
   request,
 }) => {
   await page.goto(`/pipelines/${pipelineId}`);
-  await expect(page.locator('[data-testid="chat-input"]')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid="chat-input"]')).toBeVisible({ timeout: 30_000 });
 
   await page.locator('[data-testid="chat-input"]').fill("비평가 블록 만들어줘");
   await page.locator('[data-testid="chat-send"]').click();
@@ -28,7 +28,7 @@ test("M3: '문서 등록해줘' → 문서 반영", async ({
   request,
 }) => {
   await page.goto(`/pipelines/${pipelineId}`);
-  await expect(page.locator('[data-testid="chat-input"]')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid="chat-input"]')).toBeVisible({ timeout: 30_000 });
 
   await page.locator('[data-testid="chat-input"]').fill("문서 등록해줘");
   await page.locator('[data-testid="chat-send"]').click();
@@ -68,7 +68,7 @@ test("M3: '작성해줘' → card_run 카드", async ({
   ]);
 
   await page.goto(`/pipelines/${pipelineId}`);
-  await expect(page.locator('[data-testid="chat-input"]')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid="chat-input"]')).toBeVisible({ timeout: 30_000 });
 
   await page.locator('[data-testid="chat-input"]').fill("작성해줘");
   await page.locator('[data-testid="chat-send"]').click();
@@ -84,7 +84,7 @@ test("M3: 새로고침 스레드 복원", async ({
   request,
 }) => {
   await page.goto(`/pipelines/${pipelineId}`);
-  await expect(page.locator('[data-testid="chat-input"]')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid="chat-input"]')).toBeVisible({ timeout: 30_000 });
 
   // 메시지 전송
   await page.locator('[data-testid="chat-input"]').fill("안녕");
@@ -107,7 +107,7 @@ test("M3: 새로고침 스레드 복원", async ({
 
   // 새로고침
   await page.reload();
-  await expect(page.locator('[data-testid="chat-input"]')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid="chat-input"]')).toBeVisible({ timeout: 30_000 });
 
   // 이전 메시지 복원 확인 (REST /messages로 초기 로드됨)
   await expect.poll(

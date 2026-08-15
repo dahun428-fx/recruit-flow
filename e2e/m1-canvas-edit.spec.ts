@@ -7,8 +7,11 @@ test("M1: 팔레트 더블클릭 노드 추가 → 저장 → 새로고침 유�
 }) => {
   // 빈 파이프라인으로 이동
   await page.goto(`/pipelines/${pipelineId}`);
-  // 팔레트가 로드될 때까지 대기
-  await expect(page.locator('[data-testid="palette-item-empty-agent"]')).toBeVisible({ timeout: 15_000 });
+  // 팔레트(FileExplorer)가 로드될 때까지 대기
+  await expect(page.locator('[data-testid="palette-item-empty-agent"]')).toBeVisible({ timeout: 30_000 });
+  // 캔버스가 이 파이프라인으로 로드 완료될 때까지 대기 — 로드 전 추가하면
+  // PipelineView의 그래프 로드가 노드를 덮어쓴다(실사용·경쟁 조건 방지).
+  await expect(page.getByTestId("canvas-ready")).toBeVisible({ timeout: 30_000 });
 
   // 더블클릭으로 Agent 추가
   await page.locator('[data-testid="palette-item-empty-agent"]').dblclick();
@@ -25,7 +28,7 @@ test("M1: 팔레트 더블클릭 노드 추가 → 저장 → 새로고침 유�
   await page.reload();
 
   // 노드가 여전히 있는지 확인
-  await expect(page.locator('[data-testid^="node-"]').first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid^="node-"]').first()).toBeVisible({ timeout: 30_000 });
   const countAfter = await page.locator('[data-testid^="node-"]').count();
   expect(countAfter).toBeGreaterThanOrEqual(1);
 });

@@ -33,10 +33,14 @@ const {
   saveGraph,
   createDocument,
   getRunState,
+  getRunSnapshot,
   getArtifactByNodeRun,
   listChatMessages,
+  createBlockDef,
+  resolveNodeConfig,
 } = await import("../src/lib/db/queries");
 const { runner } = await import("../src/lib/engine/runner");
+const { deriveMounts } = await import("../src/lib/engine/mount");
 const { evaluateGate, buildGateContext } = await import("../src/lib/engine/gate");
 const { db } = await import("../src/lib/db/client");
 const { nodeRuns: nodeRunsTable, runs: runsTable, artifacts: artifactsTable } =
@@ -97,7 +101,13 @@ const TERMINAL = (s: string) =>
 
 // --- 그래프 빌더 헬퍼 ---------------------------------------------------------
 let seq = 0;
-function node(pipelineId: string, type: NodeRow["type"], name: string, config: NodeConfig): NodeRow {
+function node(
+  pipelineId: string,
+  type: NodeRow["type"],
+  name: string,
+  config: NodeConfig,
+  blockDefId: string | null = null,
+): NodeRow {
   return {
     id: `n_${type}_${++seq}`,
     pipelineId,
@@ -105,6 +115,7 @@ function node(pipelineId: string, type: NodeRow["type"], name: string, config: N
     name,
     positionX: 0,
     positionY: 0,
+    blockDefId,
     config,
   };
 }
@@ -794,6 +805,227 @@ async function testGateDecisionPersisted() {
 }
 
 // ===========================================================================
+// (g) M4 PR2 — 참조 resolve 스냅샷 불변성 + config.mounts 기반 장착(deriveMounts)
+//
+// 대조군 규율: 이 케이스들은 PR2 이전 코드에서 실패한다.
+//  - 스냅샷 resolve 없음 → 스냅샷에 미해소 config가 저장돼(정의 편집이 새어) 불변성 깨짐.
+//  - deriveMounts가 mount 엣지를 순회 → 엣지 없는 config.mounts는 무시돼 장착 0개.
+// ===========================================================================
+async function testResolveSnapshotAndMounts() {
+  console.log("\n[g] resolve 스냅샷 불변성 + config.mounts 장착");
+  const pl = createPipeline("smoke-resolve-mounts");
+
+  // 팔레트 정의(block_defs): skill/rule/tool + 이들을 mounts로 참조하는 Agent 정의.
+  const skillDef = createBlockDef({
+    type: "skill", name: "STAR 기법", origin: "human",
+    config: { content: "성과는 STAR로 기술한다." },
+  });
+  const ruleDef = createBlockDef({
+    type: "rule", name: "수치화 강제", origin: "human",
+    config: { content: "모든 성과를 정량화한다." },
+  });
+  const toolDef = createBlockDef({
+    type: "tool", name: "문서 검색", origin: "human",
+    config: { toolName: "search_documents" },
+  });
+  const agentDef = createBlockDef({
+    type: "agent", name: "이력서 작성기", origin: "human",
+    config: {
+      role: "ROLE_resolved",
+      outputFormat: "markdown",
+      model: "def-model",
+      mounts: [
+        { blockDefId: skillDef.id },
+        { blockDefId: ruleDef.id, override: { content: "이 Agent에서만: 3줄 이내." } },
+        { blockDefId: toolDef.id },
+      ],
+    },
+  });
+
+  // (1) resolveNodeConfig 단위 검증 — 정의 참조 노드가 실효 config를 합성하는가.
+  // 노드 오버라이드: role. outputFormat은 인라인으로도 둔다 — validateGraph는
+  // resolve 전(라이브) config를 보므로 Output 상류 마크다운 판정에 필요하다
+  // (정의의 outputFormat은 검증 시점에 안 보임; resolve 인지 검증은 PR2 범위 밖).
+  const refNode = node(
+    pl.id, "agent", "작성기 인스턴스",
+    { role: "ROLE_override", outputFormat: "markdown" },
+    agentDef.id,
+  );
+  const resolved = resolveNodeConfig({ ...refNode }) as {
+    role: string; model?: string; outputFormat: string;
+    mounts: { blockDefId: string; type?: string; name?: string; override?: { content?: string; toolName?: string } }[];
+  };
+  check("resolve: 노드 오버라이드 우선(role=ROLE_override)", resolved.role === "ROLE_override", `role=${resolved.role}`);
+  check("resolve: 정의 필드 상속(model=def-model)", resolved.model === "def-model", `model=${resolved.model}`);
+  check("resolve: mounts 3개 해소", resolved.mounts?.length === 3, `len=${resolved.mounts?.length}`);
+  const rSkill = resolved.mounts.find((m) => m.blockDefId === skillDef.id);
+  const rRule = resolved.mounts.find((m) => m.blockDefId === ruleDef.id);
+  const rTool = resolved.mounts.find((m) => m.blockDefId === toolDef.id);
+  check("resolve: skill type·name 박제", rSkill?.type === "skill" && rSkill?.name === "STAR 기법");
+  check("resolve: skill content 정의에서", rSkill?.override?.content === "성과는 STAR로 기술한다.");
+  check("resolve: rule override가 정의 위에 덮임", rRule?.override?.content === "이 Agent에서만: 3줄 이내.");
+  check("resolve: tool toolName 박제", rTool?.override?.toolName === "search_documents");
+
+  // (2) deriveMounts — resolve된 스냅샷 형태에서 DB 조회 없이 분류하는가.
+  const resolvedGraph: Graph = {
+    nodes: [{ ...refNode, blockDefId: null, config: resolved as unknown as NodeConfig }],
+    edges: [],
+  };
+  const mounts = deriveMounts(resolvedGraph, refNode.id);
+  check("deriveMounts: skill 1개(STAR)", mounts.skills.length === 1 && mounts.skills[0].name === "STAR 기법");
+  check("deriveMounts: skill content 반영", mounts.skills[0]?.content === "성과는 STAR로 기술한다.");
+  check("deriveMounts: rule 1개(override 반영)", mounts.rules.length === 1 && mounts.rules[0].content === "이 Agent에서만: 3줄 이내.");
+  check("deriveMounts: tool 1개(search_documents)", mounts.tools.length === 1 && mounts.tools[0].toolName === "search_documents");
+
+  // (3) 전체 실행 경로 + 스냅샷 불변성.
+  const jd = node(pl.id, "input", "JD", { inlineText: "JD 본문" });
+  const out = node(pl.id, "output", "OUT", { templateId: "default" });
+  const graph: Graph = {
+    nodes: [jd, refNode, out],
+    edges: [edge(pl.id, jd, refNode), edge(pl.id, refNode, out)],
+  };
+  saveGraph(pl.id, graph);
+
+  // 스텁: resolve된 systemPrompt(역할+장착)를 관찰해 장착이 프롬프트에 합성됐는지 확인.
+  let sawSkill = false, sawRule = false, sawRole = false;
+  stubTable = [
+    {
+      match: (p) => p.systemPrompt.startsWith("ROLE_override"),
+      fn: async (p) => {
+        sawRole = true;
+        sawSkill = /## 스킬: STAR 기법/.test(p.systemPrompt) && /STAR로 기술/.test(p.systemPrompt);
+        sawRule = /## 규칙: 수치화 강제/.test(p.systemPrompt) && /3줄 이내/.test(p.systemPrompt);
+        return { text: "# 이력서 초안" };
+      },
+    },
+  ];
+
+  const res = runner.start(pl.id);
+  if ("errors" in res) throw new Error("검증 실패: " + JSON.stringify(res.errors));
+  const status = await waitFor(res.runId, TERMINAL);
+  check("resolve 파이프라인 run 성공", status === "succeeded", `status=${status}`);
+  check("실행 시 systemPrompt에 역할 반영(오버라이드)", sawRole);
+  check("실행 시 systemPrompt에 스킬 주입", sawSkill);
+  check("실행 시 systemPrompt에 규칙 append(override 반영)", sawRule);
+
+  // 스냅샷은 resolve 완결본을 담아야 한다(blockDefId=null로 자족).
+  const snap = getRunSnapshot(res.runId)!;
+  const snapAgent = snap.nodes.find((n) => n.id === refNode.id)!;
+  const snapCfg = snapAgent.config as { role: string; model?: string; mounts?: { name?: string; override?: { content?: string } }[] };
+  check("스냅샷: Agent config 완결(role=ROLE_override)", snapCfg.role === "ROLE_override");
+  check("스냅샷: 참조 끊김(blockDefId=null)", snapAgent.blockDefId === null, `blockDefId=${snapAgent.blockDefId}`);
+  const snapRule = snapCfg.mounts?.find((m) => m.name === "수치화 강제");
+  check("스냅샷: mount content 박제", snapRule?.override?.content === "이 Agent에서만: 3줄 이내.");
+
+  // ★ 불변성: run 시작 후 정의를 편집해도 스냅샷은 그대로여야 한다.
+  createBlockDef({
+    type: "rule", name: "수치화 강제", origin: "human", upsert: true,
+    config: { content: "★편집됨★ 완전히 다른 규칙." },
+  });
+  const snap2 = getRunSnapshot(res.runId)!;
+  const snap2Rule = (snap2.nodes.find((n) => n.id === refNode.id)!.config as {
+    mounts?: { name?: string; override?: { content?: string } }[];
+  }).mounts?.find((m) => m.name === "수치화 강제");
+  check(
+    "불변성: 정의 편집 후에도 스냅샷 mount content 불변",
+    snap2Rule?.override?.content === "이 Agent에서만: 3줄 이내.",
+    `after-edit=${snap2Rule?.override?.content}`,
+  );
+
+  // deriveMounts도 스냅샷(불변)에서 읽으므로 편집 후에도 동일 content.
+  const mounts2 = deriveMounts(snap2, refNode.id);
+  check(
+    "불변성: deriveMounts도 편집 전 content 유지(DB 재조회 없음)",
+    mounts2.rules.find((r) => r.name === "수치화 강제")?.content === "이 Agent에서만: 3줄 이내.",
+  );
+}
+
+// ===========================================================================
+// (R1) M4 참조노드 회귀 — validateGraph를 resolve 후 그래프로 돌려야 한다.
+//
+// 배경: UI가 만드는 참조 노드는 config={}(실효 config는 block_def에 있음)다.
+// validation.ts의 emitsJson/emitsMarkdown은 node.config.outputFormat을 직접
+// 읽으므로, resolve 전(라이브) 그래프로 검증하면 참조 Agent의 outputFormat이
+// undefined다:
+//   - 참조 Agent(json)가 Gate 상류면 emitsJson=false → gate_json_upstream 오검증
+//   - 참조 Agent(markdown)가 Output 상류면 emitsMarkdown=false →
+//     output_markdown_count(0개) 오검증
+// → 참조 Agent가 낀 파이프라인이 실행 거부된다.
+//
+// 대조군 규율: runner.start/startFrom의 검증-순서 수정(resolve 먼저) 이전
+// 코드에서 이 케이스는 반드시 실패한다("검증 실패: [...gate_json_upstream...]"
+// 또는 output_markdown_count로 runner.start가 {errors} 반환). 그 실패를 본
+// 뒤에만 이 케이스를 채택한다. [g](testResolveSnapshotAndMounts)는 ref 노드에
+// outputFormat을 인라인으로도 박아 이 회귀를 못 잡으므로, 여기서는 반드시
+// config={}인 순수 참조 노드로 구성한다.
+// ===========================================================================
+async function testRefNodeValidationRegression() {
+  console.log("\n[R1] 참조노드(config={}) Gate 상류/Output 상류 검증 회귀");
+  const pl = createPipeline("smoke-ref-validation");
+
+  // 팔레트 정의: 실효 config(outputFormat 포함)는 전부 block_def에 있다.
+  const writerDef = createBlockDef({
+    type: "agent", name: "작성기 정의", origin: "human",
+    config: { role: "ROLE_refwriter", outputFormat: "markdown" },
+  });
+  const screenDef = createBlockDef({
+    type: "agent", name: "채점기 정의", origin: "human",
+    config: { role: "ROLE_refscreen", outputFormat: "json", jsonSchema: "{total:number}" },
+  });
+
+  const jd = node(pl.id, "input", "JD", { inlineText: "JD 본문" });
+  // 순수 참조 노드: config={}. outputFormat은 오직 block_def에만 존재.
+  //  - writer(markdown 정의)가 Output 상류 → output_markdown_count 회귀 대상.
+  //  - screen(json 정의)이 Gate 상류 → gate_json_upstream 회귀 대상.
+  const writer = node(pl.id, "agent", "writer", {} as NodeConfig, writerDef.id);
+  const screen = node(pl.id, "agent", "screen", {} as NodeConfig, screenDef.id);
+  const gate = node(pl.id, "gate", "gate", { expr: "screen.total >= 80", maxLoops: 3, failTargetNodeId: writer.id });
+  const out = node(pl.id, "output", "OUT", { templateId: "default" });
+  const graph: Graph = {
+    nodes: [jd, writer, screen, gate, out],
+    edges: [
+      edge(pl.id, jd, writer),
+      edge(pl.id, writer, screen),
+      edge(pl.id, writer, gate, { inputOrder: 0 }),
+      edge(pl.id, screen, gate, { inputOrder: 1 }),
+      edge(pl.id, gate, out, { sourceHandle: "pass" }),
+      edge(pl.id, gate, writer, { sourceHandle: "fail" }),
+    ],
+  };
+  saveGraph(pl.id, graph);
+
+  stubTable = [
+    { match: (p) => p.systemPrompt.startsWith("ROLE_refwriter"), fn: async () => ({ text: "# 참조 작성기 초안" }) },
+    // 즉시 pass(85) — 검증 통과·정상 실행·아티팩트 생성만 확인하면 되므로 루프 불필요.
+    { match: (p) => p.systemPrompt.startsWith("ROLE_refscreen"), fn: async () => ({ text: JSON.stringify({ total: 85 }) }) },
+  ];
+
+  // 핵심 단언: 검증 통과(runner.start가 {errors}를 반환하지 않는다).
+  // 수정 전 코드에서는 여기서 gate_json_upstream/output_markdown_count로 실패한다.
+  const res = runner.start(pl.id);
+  const rejected = "errors" in res;
+  check(
+    "참조노드 파이프라인 검증 통과(gate_json_upstream/output_markdown_count 오검증 없음)",
+    !rejected,
+    rejected ? "errors=" + JSON.stringify((res as { errors: unknown }).errors) : undefined,
+  );
+  if (rejected) return; // 검증 거부 시 이후 실행 단언은 무의미.
+
+  const status = await waitFor(res.runId, TERMINAL);
+  check("참조노드 파이프라인 run 성공", status === "succeeded", `status=${status}`);
+
+  const nrs = nodeRunsOf(res.runId);
+  // Gate 상류 참조 Agent(json)가 실제로 json 아티팩트를 냈는가.
+  const screenNr = nrs.find((n) => n.nodeId === screen.id && n.status === "succeeded");
+  const screenArt = screenNr ? artifactOf(screenNr.id) : null;
+  check("참조 Agent(json) 아티팩트 생성", !!screenArt && screenArt.format === "json", screenArt?.format);
+  // Output 상류 참조 Agent(markdown)가 Gate pass 통과로 Output까지 흘렀는가.
+  const outNr = nrs.find((n) => n.nodeId === out.id && n.status === "succeeded");
+  const outArt = outNr ? artifactOf(outNr.id) : null;
+  check("Output HTML 아티팩트 생성(markdown 참조 Agent가 상류)", !!outArt && outArt.format === "html" && /<html/i.test(outArt.content));
+}
+
+// ===========================================================================
 // main
 // ===========================================================================
 async function main() {
@@ -810,6 +1042,8 @@ async function main() {
   await testPartialRerun();
   await testCancel();
   await testRecovery();
+  await testResolveSnapshotAndMounts();
+  await testRefNodeValidationRegression();
 
   console.log(`\n===== 스모크 결과: PASS ${pass} / FAIL ${fail} =====`);
   if (fail > 0) {
