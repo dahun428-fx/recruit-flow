@@ -97,6 +97,18 @@ UI는 항상 완전한 그래프를 전송하므로 영향받지 않는다. 이 
 `get_document`·`search_documents`·`edit_document`는 챗봇 tool이며
 Agent 장착 도구(Tool 칩)와는 별개다(nodes.md §7).
 
+**JD 교체 루프 (M5, 워크스트림 A)**: 사용자가 새 JD 텍스트를 주면 챗봇은
+`register_document(name="현재 JD", content=…)`(이름 upsert = 같은 이름이면
+새 버전)로 갱신한 뒤 `trigger_run`으로 잇는다. JD 입력 노드가 `현재 JD`
+문서를 참조하고 Input이 실행 시점 최신 버전을 읽으므로(nodes.md §3) 새
+tool·재배선 없이 맞춤 이력서 run이 시작된다. 챗봇 시스템 프롬프트에 이
+이름 규약을 명시한다.
+
+**계획된 tool (M5, 워크스트림 C — tool 계약 변경, 승인 게이트 대기)**:
+`check_jd_coverage`(읽기) — JD와 증거베이스를 읽어 필수 요건 커버리지를
+요약, 직군 불일치를 "작성해줘" 전에 경고. 읽기 tool이라 결정 5(add-only)
+무위반. 구현은 code-reviewer 게이트(결정 5 회귀 검증) 통과 후.
+
 ## 3. SSE 이벤트
 
 run 스코프 3종 + M3 채팅 3종 + 트레이 1종 + 문서 변경 1종(M4 신규).

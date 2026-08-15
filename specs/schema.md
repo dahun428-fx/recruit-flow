@@ -84,6 +84,7 @@ M4 재설계(2026-08-15): 참조+오버라이드 시맨틱(결정 1), 장착 칩
 | status | text | `running` / `waiting_human` / `succeeded` / `failed` / `gate_failed` / `cancelled` |
 | graph_snapshot | text (JSON) | 시작 시 nodes+edges 전체 복사. 참조 resolve 완결 config 포함(M4) |
 | upstream_run_id | text nullable | 부분 재실행 시 아티팩트 재사용 출처(직전 완료 run) |
+| label | text nullable | **M5 워크스트림 D (계획 — 마이그레이션 대기)**: JD별 run 그룹핑용 자유 라벨(회사/직군명). "현재 JD" 규약(nodes.md §3)상 모든 run의 Input documentId가 동일하므로 documentId로는 run을 구분 못 함 → 라벨로 JD별 히스토리 조회. 챗봇/사용자가 세팅. 러너 무변경 |
 | started_at / ended_at | integer | |
 
 같은 파이프라인의 `running`/`waiting_human` run은 1개 제한(Q14) — 앱

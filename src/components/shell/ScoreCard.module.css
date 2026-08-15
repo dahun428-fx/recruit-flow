@@ -1,0 +1,247 @@
+/* 채점 에이전트 JSON 카드 (M5 워크스트림 B) */
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fafbfc;
+  overflow: hidden;
+}
+
+/* ── 헤더 ── */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--border);
+  background: #fff;
+  flex-wrap: wrap;
+}
+
+.verdictPass {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 60px;
+  padding: 3px 12px;
+  border-radius: 99px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  background: #d1fadf;
+  color: #166534;
+  border: 1px solid #86efac;
+  flex: none;
+}
+
+.verdictFail {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 60px;
+  padding: 3px 12px;
+  border-radius: 99px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+  flex: none;
+}
+
+.scoreBlock {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.scoreValue {
+  font-size: 28px;
+  font-weight: 800;
+  color: #1a202c;
+  line-height: 1;
+}
+
+.scoreBar {
+  font-size: 13px;
+  color: #7a8494;
+  font-weight: 500;
+}
+
+.streamBadge {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #e8f2ff;
+  color: #2470c2;
+  border-radius: 99px;
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ── 점수 추이 ── */
+.trend {
+  padding: 10px 14px 6px;
+  border-bottom: 1px solid var(--border);
+  background: #f8f9ff;
+}
+
+.trendLabel {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #7a8494;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 5px;
+}
+
+.trendRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.trendPass {
+  color: #166534;
+  font-weight: 700;
+}
+
+.trendFail {
+  color: #991b1b;
+  font-weight: 700;
+}
+
+.trendArrow {
+  color: #b0b8c9;
+  font-size: 11px;
+  margin: 0 2px;
+}
+
+/* ── blockers ── */
+.blockers {
+  padding: 10px 14px 8px;
+}
+
+.blockersLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: #7a8494;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 7px;
+}
+
+.blockerList {
+  margin: 0 0 0 16px;
+  padding: 0;
+  list-style: disc;
+}
+
+.blockerItem {
+  font-size: 12.5px;
+  color: #38404d;
+  line-height: 1.65;
+  margin-bottom: 3px;
+}
+
+.noBlockers {
+  padding: 8px 14px;
+  font-size: 12px;
+  color: #166534;
+  font-weight: 600;
+}
+
+/* ── blockers diff ── */
+.diff {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.diffLabel {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #7a8494;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 5px;
+}
+
+.diffList {
+  margin: 0 0 0 16px;
+  padding: 0;
+  list-style: disc;
+}
+
+.diffFixed {
+  font-size: 12px;
+  color: #166534;
+  line-height: 1.6;
+  margin-bottom: 2px;
+  text-decoration: line-through;
+  text-decoration-color: #86efac;
+}
+
+/* ── 원문 JSON 토글 ── */
+.rawToggleRow {
+  padding: 6px 14px 8px;
+  border-top: 1px solid var(--border);
+}
+
+.rawToggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 11.5px;
+  color: #7a8494;
+  cursor: pointer;
+}
+
+.rawToggle:hover {
+  background: #f0f0f0;
+  color: #38404d;
+}
+
+.rawJson {
+  margin: 0 14px 10px;
+  background: #f1f3f7;
+  border-radius: 7px;
+  padding: 10px 12px;
+  font: 11.5px/1.6 Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #38404d;
+}
+
+/* ── 범용 JSON 폴백 ── */
+.genericJson {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fafbfc;
+  font: 11.5px/1.6 Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #38404d;
+  overflow-x: auto;
+}
+
+.numToken {
+  color: #2563eb;
+  font-weight: 600;
+}
+
+.cursor {
+  display: inline-block;
+  width: 7px;
+  height: 13px;
+  background: var(--st-running);
+  vertical-align: -2px;
+  animation: rf-blink 1s step-end infinite;
+}

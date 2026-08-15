@@ -215,9 +215,33 @@ export function InputForm({
   overriddenKeys: Set<string> | null;
 }) {
   const [docs, setDocs] = useState<Document[]>([]);
+  // JD 붙여넣기 — documentId 모드용 상태
+  const [pasteText, setPasteText] = useState("");
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+
   useEffect(() => {
     api.listDocuments().then(setDocs).catch(() => {});
   }, []);
+
+  // 선택된 문서 정보 조회
+  const selectedDoc = docs.find((d) => d.id === config.documentId);
+
+  /** documentId 모드: 참조 문서에 author=human 새 버전 저장 */
+  async function handleSaveVersion() {
+    if (!config.documentId || !pasteText.trim()) return;
+    setSaveStatus("saving");
+    try {
+      await api.saveDocument(config.documentId, pasteText.trim());
+      setSaveStatus("saved");
+      setPasteText("");
+      // 버전 번호 갱신을 위해 문서 목록 재조회
+      api.listDocuments().then(setDocs).catch(() => {});
+      setTimeout(() => setSaveStatus("idle"), 3000);
+    } catch {
+      setSaveStatus("error");
+      setTimeout(() => setSaveStatus("idle"), 3000);
+    }
+  }
 
   return (
     <>
@@ -231,13 +255,15 @@ export function InputForm({
         </FieldLabel>
         <select
           value={config.documentId ?? ""}
-          onChange={(e) =>
+          onChange={(e) => {
+            setPasteText("");
+            setSaveStatus("idle");
             onChange({
               ...config,
               documentId: e.target.value || undefined,
               inlineText: e.target.value ? undefined : config.inlineText,
-            })
-          }
+            });
+          }}
         >
           <option value="">(문서 선택)</option>
           {docs.map((d) => (
@@ -247,15 +273,69 @@ export function InputForm({
           ))}
         </select>
       </div>
+
+      {/* documentId 모드: JD 붙여넣기 — 새 버전 저장 (M5 워크스트림 A-3) */}
+      {config.documentId && (
+        <div className={panelStyles.field}>
+          <label
+            data-tip="참조 문서에 새 내용을 붙여넣으면 다음 run이 이 버전을 사용합니다. documentId 재배선 없이 JD를 교체할 수 있습니다(nodes.md §3 JD 교체 반복 루프 규약)"
+          >
+            내용 붙여넣기 → 새 버전 저장
+            {selectedDoc && (
+              <span style={{ marginLeft: 6, color: "#aab0bc", fontWeight: 400 }}>
+                ({selectedDoc.name} · v{selectedDoc.currentVersion})
+              </span>
+            )}
+          </label>
+          <textarea
+            value={pasteText}
+            placeholder="새 JD 전문을 붙여넣으세요…"
+            rows={6}
+            onChange={(e) => {
+              setPasteText(e.target.value);
+              if (saveStatus !== "idle") setSaveStatus("idle");
+            }}
+          />
+          <button
+            onClick={() => void handleSaveVersion()}
+            disabled={!pasteText.trim() || saveStatus === "saving"}
+            style={{
+              marginTop: 6,
+              padding: "5px 14px",
+              borderRadius: 7,
+              border: "1px solid var(--border)",
+              background: pasteText.trim() ? "var(--c-input, #2b7fff)" : "#e5e8ec",
+              color: pasteText.trim() ? "#fff" : "#aab0bc",
+              cursor: pasteText.trim() ? "pointer" : "default",
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            {saveStatus === "saving" ? "저장 중…" : "새 버전 저장"}
+          </button>
+          {saveStatus === "saved" && (
+            <div className={panelStyles.runningNote} style={{ color: "#2b7fff", marginTop: 6 }}>
+              저장 완료 — 다음 run에 반영됩니다
+            </div>
+          )}
+          {saveStatus === "error" && (
+            <div className={panelStyles.runningNote} style={{ color: "#e53e3e", marginTop: 6 }}>
+              저장 실패 — 다시 시도해 주세요
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* inlineText 모드: 인라인 텍스트를 직접 편집 (고급 설정) */}
       <details className={panelStyles.adv}>
-        <summary data-tip="문서 대신 직접 입력한 텍스트를 공급">
+        <summary data-tip="문서 대신 직접 입력한 텍스트를 공급. documentId 미선택 시 이 텍스트가 Input 아티팩트가 됩니다">
           고급 설정
         </summary>
         <div className={panelStyles.field}>
           <FieldLabel
             fieldKey="inlineText"
             overriddenKeys={overriddenKeys}
-            tip="documentId 대신 인라인 텍스트 모드"
+            tip="documentId 대신 인라인 텍스트 모드. 내용을 바꾸면 저장 후 다음 run에 반영됩니다"
           >
             인라인 텍스트
           </FieldLabel>

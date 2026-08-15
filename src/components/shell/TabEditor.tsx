@@ -25,6 +25,7 @@ import type {
 } from "@/lib/types";
 import styles from "./TabEditor.module.css";
 import panelStyles from "./NodeEditor.module.css";
+import { ScoreCard } from "./ScoreCard";
 import {
   AgentForm,
   GateForm,
@@ -778,21 +779,15 @@ function NodeArtifacts({
         ))}
 
       {isJson && (
-        <div className={panelStyles.artifact}>
-          <pre className={panelStyles.jsonView}>{formatJson(artifact.content)}</pre>
-          {streaming && <span className={panelStyles.cursor} />}
-        </div>
+        <ScoreCard
+          artifact={artifact}
+          iterations={iterations}
+          artifactsMap={run?.artifacts ?? {}}
+          streaming={streaming}
+        />
       )}
     </>
   );
-}
-
-function formatJson(content: string): string {
-  try {
-    return JSON.stringify(JSON.parse(content), null, 2);
-  } catch {
-    return content;
-  }
 }
 
 /** M4: 노드 편집기 탭 — SidePanel 기능 이관. */

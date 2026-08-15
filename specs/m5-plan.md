@@ -38,11 +38,22 @@ JD)으로 엔진·에이전트·SSE·게이트 루프가 **실동작**함도 확
 이후 모든 워크스트림의 전제. 실 DB를 건드리므로 별도 승인 후 실행하고,
 검증은 격리 DB에서 한다(CLAUDE.md).
 
-- **깨진 문서 복구/정리**: `test-jd.md`·`test-evidence.md` 등 cp949/U+FFFD
-  오염 문서를 UTF-8로 복구하거나 폐기. 방지 규칙은 이미 CLAUDE.md·
-  [[recruit-flow-windows-cli-korean-trap]]에 있음.
+- **깨진 문서 정리**: 실 DB 조사 결과(2026-08-16) 23개 중 **5개 문서가
+  U+FFFD 오염** — `test-jd.md`(84곳/161)·`test-evidence.md`(53곳/190)·`JD`
+  (5/11)·이름까지 깨진 JD 2개. **U+FFFD는 되돌릴 수 없다**(cp949→UTF-8 치환
+  시 원본 바이트 소실) → "복구"가 아니라 **폐기 또는 원본 재공급**만 가능.
+  실 증거베이스(experience-bank/profile 등)는 오염 없음. 파이프라인·노드
+  이름도 오염 0건. 방지 규칙은 CLAUDE.md·[[recruit-flow-windows-cli-korean-trap]].
+  ⚠️ 증거 입력 노드가 오염된 `test-evidence.md`를 참조 → 0-2 재배선이
+  삭제보다 선행.
 - **canonical 파이프라인 실데이터 연결**: 증거 입력·에이전트 mount가 테스트
-  픽스처가 아니라 실 증거베이스를 참조하도록 재배선.
+  픽스처가 아니라 실 증거베이스를 참조하도록 재배선. 조사 결과(2026-08-16)
+  실 증거베이스는 모두 정상(U+FFFD 0): `experience-bank.md`(41K, 리치
+  경력)·`profile.md`(5K)·`base-resume.md`(16K, 정본 이력서)·`positioning.md`
+  (16K)·`canonical-lines.md`(130K, 확정 문장). **증거 입력 노드를
+  `experience-bank.md`(가장 포괄적) 또는 `base-resume.md`(정본)로 재배선**
+  추천 — 나머지는 에이전트 get_document tool로 접근(0-3 mounts와 연동).
+  현재 참조 `test-evidence.md`(190자, 53 U+FFFD)는 폐기.
 - **고아 tool 노드 이관**(M4 잔여): "문서 검색 도구" tool 노드가 현재
   writer에만 mount돼 있고 채점 노드엔 없다. M4 결정 3(장착=Agent
   config.mounts 칩)에 맞춰 데이터 이관 스크립트로 옮기고, 채점 노드에도
@@ -132,10 +143,31 @@ M5-0 선결 정리(실 DB, 승인 후)
 3종+**(D), **run 히스토리 전체 탐색**(D), **C안 "새 지원" 플로우**(A). 이들을
 M5로 승격할지, 일부만 승격할지 확정해야 한다.
 
-## 열린 질문 (승인 시 확정)
+## 확정된 결정 (2026-08-16, 사용자 "추천대로" + architect 검토 반영)
 
-1. 워크스트림 A 설계: A안(챗봇 규약) 단독 / A+B 병행 / 다른 방식?
-2. v2 승격 범위: 템플릿 다양화·히스토리 탐색을 M5에 넣는가?
-3. JD-증거 매칭 사전점검을 노드로 넣는가, 실행 전 경량 체크로 넣는가?
-4. M5-0 실 DB 정리를 지금 승인하는가(별도 승인 규칙)?
-5. 각 워크스트림 완료 기준의 검증 깊이(qa-verifier 시나리오 범위).
+1. **워크스트림 A**: "현재 JD" 챗봇 규약 + 정의탭 JD 교체 병행. architect
+   판정 — 이건 설계 포크가 아니라 **규약 명문화**다: `register_document`가
+   이미 이름 upsert이고 Input이 실행 시점 최신 버전을 읽으므로(nodes.md §3)
+   재배선 없이 이미 성립. 러너·tool 변경 없음. → 스펙 델타 반영 완료.
+2. **v2 승격**: run 히스토리 탐색 승격(D). 출력 템플릿 3종+는 v2 유지, 소폭
+   개선만.
+3. **JD-증거 매칭 사전점검**: 노드 아님 — **engine.md §2 챗봇 읽기 tool
+   `check_jd_coverage`** (초안의 nodes.md 배치는 오류, 수정 완료). tool 계약
+   변경이라 code-reviewer 게이트.
+4. **M5-0 실 DB 정리**: 승인. 실행은 격리 DB 드라이런(백업→격리 검증→실
+   적용→기준선 run) 후.
+5. **검증 깊이**: 워크스트림별 qa-verifier + 완료 시 `npm run e2e` 회귀
+   게이트. 스키마/러너/챗봇tool 건드리는 항목(D-2·C-3·D-3·0-3)은
+   code-reviewer 게이트 생략 금지.
+
+### architect 스펙 델타 (적용 완료)
+- `ui.md §4` 아티팩트 탭: 채점 JSON 카드 렌더(total/verdict/passBar/blockers)
+  + 회차 비교(신규 API·SSE 불요). `nodes.md §2` 채점 권장 스키마.
+- `nodes.md §3`·`engine.md §2`·`blueprint 9b`: 현재 JD 교체 루프 규약.
+- `engine.md §2`: `check_jd_coverage` 계획 tool 명문화(게이트 대기).
+- `schema.md runs`: `label` 컬럼(D, 마이그레이션 대기).
+
+### 착수 순서 (architect)
+최저위험 진입점 = **B-1 채점 JSON 렌더**(스키마·러너·API·SDK 무변경). 이후
+A-2/A-3 → C-1/C-2 → 승인 게이트 항목(C-3 tool, D-2 마이그레이션, D-3 tool,
+0-3 mounts 이관) 순. `chat-tools.ts`를 A-2·C-3·D-3이 공유하므로 순차화.
