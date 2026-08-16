@@ -145,6 +145,18 @@ export const artifacts = sqliteTable("artifacts", {
 });
 
 // ---------------------------------------------------------------------------
+// folders — 문서 임의 폴더 하이라키 (schema.md §folders)
+// 순환 금지·parent_id 존재 검증은 SQLite ADD COLUMN 한계로 앱 레벨 강제.
+// ---------------------------------------------------------------------------
+export const folders = sqliteTable("folders", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  // 상위 폴더(null=루트 직속). FK 선언은 하되 SQLite 앱 레벨 강제.
+  parentId: text("parent_id").references((): ReturnType<typeof text> => folders.id),
+  createdAt: integer("created_at").notNull(),
+});
+
+// ---------------------------------------------------------------------------
 // documents / document_versions — 본문은 versions에만 존재
 // ---------------------------------------------------------------------------
 export const documents = sqliteTable("documents", {
@@ -152,6 +164,8 @@ export const documents = sqliteTable("documents", {
   name: text("name").notNull(),
   // 현재 본문 = current_version 행
   currentVersion: integer("current_version").notNull().default(0),
+  // M5(v2→현행): 소속 폴더(null=루트). FK 선언, 앱 레벨 강제.
+  folderId: text("folder_id").references(() => folders.id),
   createdAt: integer("created_at").notNull(),
 });
 

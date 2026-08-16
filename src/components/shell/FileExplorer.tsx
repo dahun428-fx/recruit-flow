@@ -2,13 +2,14 @@
 // M4 후속: 프로젝트(파이프라인) 최상위 트리 추가. Windows 파일 탐색기 시각.
 // 블록·문서·실행기록은 프로젝트 구획 아래로 재배치.
 // 저장된 블록 정의 클릭 동작: 더블클릭=정의 탭 열기, 단일클릭=no-op.
+// M5: 문서 구획 폴더 하이라키 추가.
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useCanvasStore } from "@/store/canvas";
-import type { BlockDef, Document, NodeType, PipelineSummary, Run } from "@/lib/types";
+import type { BlockDef, Document, Folder, NodeType, PipelineSummary, Run } from "@/lib/types";
 import { DRAG_MIME, TRAY_DRAG_MIME } from "@/lib/drag";
 import { defaultConfig } from "@/components/canvas/blocks";
 import styles from "./FileExplorer.module.css";
@@ -94,7 +95,17 @@ interface ConfirmState {
 }
 
 /** 컨텍스트 메뉴 state. */
-type ContextSection = "empty" | "library" | "tray" | "typeFolder" | "blockRoot" | "docFolder" | "docItem" | "projectFolder";
+type ContextSection =
+  | "empty"
+  | "library"
+  | "tray"
+  | "typeFolder"
+  | "blockRoot"
+  | "docFolder"
+  | "docItem"
+  | "projectFolder"
+  | "folderItem";
+
 interface ContextMenuState {
   section: ContextSection;
   x: number;
@@ -105,6 +116,9 @@ interface ContextMenuState {
   blockDef?: BlockDef;
   trayDef?: BlockDef;
   doc?: Document;
+  /** 폴더 항목 우클릭 */
+  folderId?: string;
+  folderName?: string;
   /** blockRoot 서브메뉴 열림 여부 */
   createSubmenuOpen?: boolean;
 }
@@ -122,6 +136,22 @@ interface Props {
 
 // ── 최상위 구획 펼침 상태 키
 type TopSection = "projects" | "blocks" | "documents";
+
+/** 폴더의 모든 하위 폴더 ID를 반환 (순환 감지용) */
+function getDescendantIds(folderId: string, allFolders: Folder[]): Set<string> {
+  const result = new Set<string>();
+  const queue = [folderId];
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    for (const f of allFolders) {
+      if (f.parentId === id) {
+        result.add(f.id);
+        queue.push(f.id);
+      }
+    }
+  }
+  return result;
+}
 
 export function FileExplorer({
   pipelineId,
@@ -154,6 +184,7 @@ export function FileExplorer({
 
   const [blockDefs, setBlockDefs] = useState<BlockDef[]>([]);
   const [docs, setDocs] = useState<Document[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
   const [query, setQuery] = useState("");
   // 기본 펼침: agent/input/output 은 열려 있음, skill/rule/tool은 접힘
   const [collapsedTypes, setCollapsedTypes] = useState<Set<string>>(
@@ -179,9 +210,21 @@ export function FileExplorer({
   const [newDocName, setNewDocName] = useState("");
   const newDocInputRef = useRef<HTMLInputElement>(null);
 
+  // ── 폴더 관련 state
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [renamingFolderValue, setRenamingFolderValue] = useState("");
+  // undefined=생성 안 함, null=루트에 생성, string=해당 폴더 하위에 생성
+  const [newFolderParentId, setNewFolderParentId] = useState<string | null | undefined>(undefined);
+  const [newFolderName, setNewFolderName] = useState("");
+  // 드래그 오버 중인 폴더 id (undefined=없음)
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | undefined>(undefined);
+
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const trayRef = useRef<HTMLDivElement>(null);
+  const renameFolderInputRef = useRef<HTMLInputElement>(null);
+  const newFolderInputRef = useRef<HTMLInputElement>(null);
 
   // ── 파이프라인 로드
   const loadPipelines = useCallback(async () => {
@@ -229,10 +272,15 @@ export function FileExplorer({
     }
   }, []);
 
-  const loadDocs = useCallback(async () => {
+  // ── 폴더 + 문서 동시 로드
+  const loadFoldersAndDocs = useCallback(async () => {
     try {
-      const items = await api.listDocuments();
-      setDocs(items);
+      const [folderItems, docItems] = await Promise.all([
+        api.listFolders(),
+        api.listDocuments(),
+      ]);
+      setFolders(folderItems);
+      setDocs(docItems);
     } catch {
       // 무시
     }
@@ -241,8 +289,8 @@ export function FileExplorer({
   useEffect(() => {
     void loadPipelines();
     void loadDefs();
-    void loadDocs();
-  }, [loadPipelines, loadDefs, loadDocs]);
+    void loadFoldersAndDocs();
+  }, [loadPipelines, loadDefs, loadFoldersAndDocs]);
 
   // 블록 정의 변경 이벤트 수신
   useEffect(() => {
@@ -256,11 +304,11 @@ export function FileExplorer({
   // 문서 변경 이벤트 수신
   useEffect(() => {
     function onDocsChanged() {
-      void loadDocs();
+      void loadFoldersAndDocs();
     }
     window.addEventListener("rf:documentsChanged", onDocsChanged);
     return () => window.removeEventListener("rf:documentsChanged", onDocsChanged);
-  }, [loadDocs]);
+  }, [loadFoldersAndDocs]);
 
   // U4: rf:trayHighlight 이벤트 수신 → 트레이 항목 하이라이트
   useEffect(() => {
@@ -304,11 +352,19 @@ export function FileExplorer({
         if (newDocId) {
           cancelNewDoc();
         }
+        if (renamingFolderId) {
+          setRenamingFolderId(null);
+          setRenamingFolderValue("");
+        }
+        if (newFolderParentId !== undefined) {
+          setNewFolderParentId(undefined);
+          setNewFolderName("");
+        }
       }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [renamingId, newDocId]);
+  }, [renamingId, newDocId, renamingFolderId, newFolderParentId]);
 
   // 이름 변경 input에 포커스
   useEffect(() => {
@@ -325,6 +381,22 @@ export function FileExplorer({
       newDocInputRef.current.select();
     }
   }, [newDocId]);
+
+  // 폴더 이름 변경 input에 포커스
+  useEffect(() => {
+    if (renamingFolderId && renameFolderInputRef.current) {
+      renameFolderInputRef.current.focus();
+      renameFolderInputRef.current.select();
+    }
+  }, [renamingFolderId]);
+
+  // 새 폴더 input에 포커스
+  useEffect(() => {
+    if (newFolderParentId !== undefined && newFolderInputRef.current) {
+      newFolderInputRef.current.focus();
+      newFolderInputRef.current.select();
+    }
+  }, [newFolderParentId]);
 
   const toggleType = (type: string) => {
     setCollapsedTypes((prev) => {
@@ -352,7 +424,7 @@ export function FileExplorer({
     ? docs.filter((d) => d.name.toLowerCase().includes(q))
     : docs;
 
-  // OS 드래그 앤 드롭 — .md/.txt 임포트
+  // OS 드래그 앤 드롭 — .md/.txt 임포트 / 내부 이동 분기
   const onFileDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDraggingOver(true);
@@ -362,6 +434,22 @@ export function FileExplorer({
     async (e: React.DragEvent) => {
       e.preventDefault();
       setDraggingOver(false);
+
+      // 내부 드래그 이동: 커스텀 MIME 먼저 확인
+      const docId = e.dataTransfer.getData("application/x-rf-doc-move");
+      const movFolderId = e.dataTransfer.getData("application/x-rf-folder-move");
+      if (docId) {
+        await api.moveDocument(docId, null);
+        await loadFoldersAndDocs();
+        return;
+      }
+      if (movFolderId) {
+        await api.moveFolder(movFolderId, null);
+        await loadFoldersAndDocs();
+        return;
+      }
+
+      // OS 파일 임포트 (.md/.txt)
       const files = Array.from(e.dataTransfer.files).filter(
         (f) => f.name.endsWith(".md") || f.name.endsWith(".txt"),
       );
@@ -373,9 +461,9 @@ export function FileExplorer({
           // 무시
         }
       }
-      if (files.length > 0) await loadDocs();
+      if (files.length > 0) await loadFoldersAndDocs();
     },
-    [loadDocs],
+    [loadFoldersAndDocs],
   );
 
   function createNewDoc() {
@@ -390,11 +478,11 @@ export function FileExplorer({
     const trimmed = newDocName.trim();
     setNewDocId(null);
     setNewDocName("");
-    // 빈 값 blur/Enter는 취소 — 유령 문서 생성 방지(DocumentsView.commitCreate와 동일 시맨틱).
+    // 빈 값 blur/Enter는 취소 — 유령 문서 생성 방지
     if (!trimmed) return;
     try {
       const doc = await api.createDocument(trimmed, "", "새 문서");
-      await loadDocs();
+      await loadFoldersAndDocs();
       onOpenDocument(doc.id, doc.name);
     } catch {
       // 무시
@@ -404,6 +492,75 @@ export function FileExplorer({
   function cancelNewDoc() {
     setNewDocId(null);
     setNewDocName("");
+  }
+
+  // ── 새 폴더 생성 ──────────────────────────────────────────────
+  async function commitNewFolder() {
+    const name = newFolderName.trim();
+    const parentId = newFolderParentId; // null=루트, string=상위 폴더
+    setNewFolderParentId(undefined);
+    setNewFolderName("");
+    if (!name) return;
+    try {
+      const folder = await api.createFolder(name, parentId ?? undefined);
+      setFolders((prev) => [...prev, folder]);
+      if (parentId) {
+        setExpandedFolders((prev) => {
+          const n = new Set(prev);
+          n.add(parentId);
+          return n;
+        });
+      }
+    } catch {
+      // 무시
+    }
+  }
+
+  // ── 폴더 이름 변경 ─────────────────────────────────────────────
+  async function commitFolderRename(id: string) {
+    const name = renamingFolderValue.trim();
+    setRenamingFolderId(null);
+    setRenamingFolderValue("");
+    if (!name) return;
+    try {
+      setFolders((prev) => prev.map((f) => (f.id === id ? { ...f, name } : f)));
+      await api.renameFolder(id, name);
+    } catch {
+      await loadFoldersAndDocs();
+    }
+  }
+
+  // ── 폴더 삭제 ──────────────────────────────────────────────────
+  function menuDeleteFolder(id: string, name: string) {
+    const { x, y } = contextMenu ?? { x: 200, y: 200 };
+    setContextMenu(null);
+    setConfirm({
+      message: `"${name}" 폴더를 삭제할까요? 하위 문서는 루트로 이동됩니다.`,
+      onConfirm: () => {
+        setFolders((prev) => prev.filter((f) => f.id !== id));
+        api
+          .deleteFolder(id)
+          .then(() => loadFoldersAndDocs())
+          .catch(() => loadFoldersAndDocs());
+        setConfirm(null);
+      },
+      x: Math.min(x, window.innerWidth - 220),
+      y: Math.min(y, window.innerHeight - 100),
+    });
+  }
+
+  // ── 폴더 경로 문자열 (검색 모드 표시용) ──────────────────────────
+  function getFolderPath(folderId: string | null): string {
+    if (!folderId) return "";
+    const parts: string[] = [];
+    let id: string | null = folderId;
+    while (id) {
+      const f = folders.find((x) => x.id === id);
+      if (!f) break;
+      parts.unshift(f.name);
+      id = f.parentId;
+    }
+    return parts.join(" / ");
   }
 
   // ── 이름 변경 ──────────────────────────────────────────────────
@@ -584,7 +741,7 @@ export function FileExplorer({
       onConfirm: () => {
         setDocs((prev) => prev.filter((d) => d.id !== doc.id));
         // 낙관적 제거 — 실패 시 목록 재동기화로 롤백.
-        api.deleteDocument(doc.id).catch(() => void loadDocs());
+        api.deleteDocument(doc.id).catch(() => void loadFoldersAndDocs());
         // 열린 탭 닫기
         window.dispatchEvent(
           new CustomEvent("rf:documentDeleted", { detail: { docId: doc.id } }),
@@ -664,9 +821,6 @@ export function FileExplorer({
 
   /**
    * run 목록을 label 별로 그룹핑한다.
-   * - label이 있는 그룹이 앞에 오고, "(라벨 없음)"이 마지막.
-   * - 같은 label 내에서는 인자로 받은 runs가 이미 최신순이므로 순서 유지.
-   * - 그룹 순서는 해당 label의 가장 최신 run 시각 기준 내림차순.
    */
   function groupRunsByLabel(runList: Run[]): Array<{ label: string; runs: Run[] }> {
     const FALLBACK = "(라벨 없음)";
@@ -677,18 +831,188 @@ export function FileExplorer({
       bucket.push(r);
       map.set(key, bucket);
     }
-    // 그룹 정렬: 라벨 있는 그룹 → 없는 그룹, 각 그룹 내에서 첫 run(최신) startedAt 기준 내림차순
     return Array.from(map.entries())
       .sort(([aLabel, aRuns], [bLabel, bRuns]) => {
         const aFallback = aLabel === FALLBACK;
         const bFallback = bLabel === FALLBACK;
         if (aFallback !== bFallback) return aFallback ? 1 : -1;
-        // 같은 카테고리 내에선 최신 run 시각 내림차순
         const aTime = aRuns[0]?.startedAt ?? 0;
         const bTime = bRuns[0]?.startedAt ?? 0;
         return bTime - aTime;
       })
       .map(([label, groupRuns]) => ({ label, runs: groupRuns }));
+  }
+
+  // ── 폴더 트리 재귀 렌더 ──────────────────────────────────────────
+  function renderFolderTree(parentId: string | null, indentLevel: number): React.ReactNode {
+    const indentKey = `treeIndent${indentLevel}` as keyof typeof styles;
+    const childFolders = folders.filter((f) => f.parentId === parentId);
+    const childDocs = docs.filter((d) => d.folderId === parentId);
+
+    return (
+      <>
+        {childFolders.map((folder) => {
+          const isExpanded = expandedFolders.has(folder.id);
+          const isRenamingFolder = renamingFolderId === folder.id;
+          const isDragOver = dragOverFolderId === folder.id;
+          const subIndentKey = `treeIndent${indentLevel + 1}` as keyof typeof styles;
+
+          return (
+            <div key={folder.id}>
+              <div
+                className={`${styles.treeFolder} ${styles[indentKey] ?? ""} ${isDragOver ? styles.folderDragOver : ""}`}
+                draggable={!isRenamingFolder}
+                onDragStart={
+                  !isRenamingFolder
+                    ? (e) => {
+                        e.dataTransfer.setData("application/x-rf-folder-move", folder.id);
+                        e.dataTransfer.effectAllowed = "move";
+                        setDragChip(e, folder.name, "#6b7280", 99);
+                      }
+                    : undefined
+                }
+                onDragOver={(e) => {
+                  if (
+                    e.dataTransfer.types.includes("application/x-rf-doc-move") ||
+                    e.dataTransfer.types.includes("application/x-rf-folder-move")
+                  ) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setDragOverFolderId(folder.id);
+                  }
+                }}
+                onDragLeave={(e) => {
+                  // 자식 요소로 이동하는 경우는 무시
+                  if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) {
+                    setDragOverFolderId(undefined);
+                  }
+                }}
+                onDrop={async (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setDragOverFolderId(undefined);
+                  const docId = e.dataTransfer.getData("application/x-rf-doc-move");
+                  const movFolderId = e.dataTransfer.getData("application/x-rf-folder-move");
+                  if (docId) {
+                    await api.moveDocument(docId, folder.id);
+                    await loadFoldersAndDocs();
+                  } else if (movFolderId) {
+                    if (movFolderId === folder.id) return;
+                    const descendants = getDescendantIds(movFolderId, folders);
+                    if (descendants.has(folder.id)) return;
+                    await api.moveFolder(movFolderId, folder.id);
+                    await loadFoldersAndDocs();
+                  }
+                }}
+                onClick={() => {
+                  if (isRenamingFolder) return;
+                  setExpandedFolders((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(folder.id)) next.delete(folder.id);
+                    else next.add(folder.id);
+                    return next;
+                  });
+                }}
+                onContextMenu={(e) =>
+                  openContextMenu(e, {
+                    section: "folderItem",
+                    folderId: folder.id,
+                    folderName: folder.name,
+                  })
+                }
+              >
+                <span className={styles.treeCaret}>{isExpanded ? "▾" : "▸"}</span>
+                <span className={styles.treeFolderIcon}>{isExpanded ? "📂" : "📁"}</span>
+                {isRenamingFolder ? (
+                  <input
+                    ref={renameFolderInputRef}
+                    className={styles.renameInput}
+                    value={renamingFolderValue}
+                    onChange={(e) => setRenamingFolderValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        void commitFolderRename(folder.id);
+                      }
+                      if (e.key === "Escape") {
+                        setRenamingFolderId(null);
+                        setRenamingFolderValue("");
+                      }
+                      e.stopPropagation();
+                    }}
+                    onBlur={() => void commitFolderRename(folder.id)}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <span className={styles.treeName}>{folder.name}</span>
+                )}
+              </div>
+
+              {isExpanded && (
+                <div>
+                  {renderFolderTree(folder.id, indentLevel + 1)}
+                  {/* 하위 폴더 생성 인라인 입력 */}
+                  {newFolderParentId === folder.id && (
+                    <div
+                      className={`${styles.treeFolder} ${styles[subIndentKey] ?? ""}`}
+                    >
+                      <span className={styles.treeCaret} />
+                      <span className={styles.treeFolderIcon}>📁</span>
+                      <input
+                        ref={newFolderInputRef}
+                        className={styles.renameInput}
+                        value={newFolderName}
+                        onChange={(e) => setNewFolderName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            void commitNewFolder();
+                          }
+                          if (e.key === "Escape") {
+                            setNewFolderParentId(undefined);
+                            setNewFolderName("");
+                          }
+                          e.stopPropagation();
+                        }}
+                        onBlur={() => void commitNewFolder()}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* 현재 레벨의 문서 */}
+        {childDocs.map((doc) => (
+          <div
+            key={doc.id}
+            className={`${styles.docItem} ${styles[indentKey] ?? ""}`}
+            data-testid={`document-list-item-${doc.id}`}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData("application/x-rf-doc-move", doc.id);
+              e.dataTransfer.effectAllowed = "move";
+              setDragChip(e, doc.name, "#6b7280", 3);
+            }}
+            onContextMenu={(e) => openContextMenu(e, { section: "docItem", doc })}
+            onClick={() => onOpenDocument(doc.id, doc.name)}
+          >
+            <span className={styles.treeFileIcon} style={{ fontSize: 11 }}>📄</span>
+            <span
+              style={{
+                flex: 1,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {doc.name}
+            </span>
+          </div>
+        ))}
+      </>
+    );
   }
 
   return (
@@ -1175,46 +1499,100 @@ export function FileExplorer({
 
           {topOpen.documents && (
             <div className={styles.treeChildren}>
-              {filteredDocs.map((doc) => (
-                <div
-                  key={doc.id}
-                  className={`${styles.docItem} ${styles.treeIndent1}`}
-                  data-testid={`document-list-item-${doc.id}`}
-                  onContextMenu={(e) =>
-                    openContextMenu(e, { section: "docItem", doc })
-                  }
-                  onClick={() => onOpenDocument(doc.id, doc.name)}
-                >
-                  <span className={styles.treeFileIcon} style={{ fontSize: 11 }}>📄</span>
-                  <span
-                    style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                  >
-                    {doc.name}
-                  </span>
-                </div>
-              ))}
-              {/* 새 문서 이름 입력 행 (서버 생성 전 인라인 입력) */}
-              {newDocId === NEW_DOC_SENTINEL && (
-                <div className={`${styles.docItem} ${styles.treeIndent1}`}>
-                  <span className={styles.treeFileIcon} style={{ fontSize: 11 }}>📄</span>
-                  <input
-                    ref={newDocInputRef}
-                    className={styles.renameInput}
-                    value={newDocName}
-                    onChange={(e) => setNewDocName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") { void commitNewDocName(); }
-                      if (e.key === "Escape") { cancelNewDoc(); }
-                      e.stopPropagation();
-                    }}
-                    onBlur={() => void commitNewDocName()}
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                </div>
+              {/* 검색 모드: 평면 목록 + 폴더 경로 표시 */}
+              {q ? (
+                <>
+                  {filteredDocs.map((doc) => {
+                    const path = getFolderPath(doc.folderId);
+                    return (
+                      <div
+                        key={doc.id}
+                        className={`${styles.docItem} ${styles.treeIndent1}`}
+                        data-testid={`document-list-item-${doc.id}`}
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData("application/x-rf-doc-move", doc.id);
+                          e.dataTransfer.effectAllowed = "move";
+                          setDragChip(e, doc.name, "#6b7280", 3);
+                        }}
+                        onContextMenu={(e) => openContextMenu(e, { section: "docItem", doc })}
+                        onClick={() => onOpenDocument(doc.id, doc.name)}
+                      >
+                        <span className={styles.treeFileIcon} style={{ fontSize: 11 }}>📄</span>
+                        <span style={{ flex: 1, overflow: "hidden", minWidth: 0 }}>
+                          <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {doc.name}
+                          </span>
+                          {path && (
+                            <span style={{ display: "block", fontSize: 10, color: "var(--text-faint)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {path}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {filteredDocs.length === 0 && (
+                    <div className={`${styles.empty} ${styles.treeIndent1}`}>검색 결과 없음</div>
+                  )}
+                </>
+              ) : (
+                <>
+                  {/* 폴더 트리 (재귀) */}
+                  {renderFolderTree(null, 1)}
+
+                  {/* 루트 폴더 생성 인라인 입력 */}
+                  {newFolderParentId === null && (
+                    <div className={`${styles.treeFolder} ${styles.treeIndent1}`}>
+                      <span className={styles.treeCaret} />
+                      <span className={styles.treeFolderIcon}>📁</span>
+                      <input
+                        ref={newFolderInputRef}
+                        className={styles.renameInput}
+                        value={newFolderName}
+                        onChange={(e) => setNewFolderName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            void commitNewFolder();
+                          }
+                          if (e.key === "Escape") {
+                            setNewFolderParentId(undefined);
+                            setNewFolderName("");
+                          }
+                          e.stopPropagation();
+                        }}
+                        onBlur={() => void commitNewFolder()}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </div>
+                  )}
+
+                  {/* 새 문서 이름 입력 행 (서버 생성 전 인라인 입력) */}
+                  {newDocId === NEW_DOC_SENTINEL && (
+                    <div className={`${styles.docItem} ${styles.treeIndent1}`}>
+                      <span className={styles.treeFileIcon} style={{ fontSize: 11 }}>📄</span>
+                      <input
+                        ref={newDocInputRef}
+                        className={styles.renameInput}
+                        value={newDocName}
+                        onChange={(e) => setNewDocName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") { void commitNewDocName(); }
+                          if (e.key === "Escape") { cancelNewDoc(); }
+                          e.stopPropagation();
+                        }}
+                        onBlur={() => void commitNewDocName()}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </div>
+                  )}
+
+                  {docs.length === 0 && folders.length === 0 && newDocId !== NEW_DOC_SENTINEL && newFolderParentId === undefined && (
+                    <div className={`${styles.empty} ${styles.treeIndent1}`}>문서 없음</div>
+                  )}
+                </>
               )}
-              {filteredDocs.length === 0 && newDocId !== NEW_DOC_SENTINEL && (
-                <div className={`${styles.empty} ${styles.treeIndent1}`}>문서 없음</div>
-              )}
+
               <button className={`${styles.newDoc} ${styles.treeIndent1}`} onClick={() => createNewDoc()}>
                 + 새 문서
               </button>
@@ -1378,9 +1756,21 @@ export function FileExplorer({
             </>
           )}
 
-          {/* 문서 폴더 우클릭 메뉴 */}
+          {/* 문서 폴더(구획 헤더) 우클릭 메뉴 */}
           {contextMenu.section === "docFolder" && (
             <>
+              <button
+                className={styles.menuItem}
+                onClick={() => {
+                  setNewFolderParentId(null);
+                  setNewFolderName("새 폴더");
+                  setTopOpen((prev) => ({ ...prev, documents: true }));
+                  setContextMenu(null);
+                }}
+              >
+                새 폴더
+              </button>
+              <div className={styles.menuDivider} />
               <button
                 className={styles.menuItem}
                 data-testid="ctx-new-doc"
@@ -1390,6 +1780,46 @@ export function FileExplorer({
                 }}
               >
                 새 문서
+              </button>
+            </>
+          )}
+
+          {/* 폴더 항목 우클릭 메뉴 */}
+          {contextMenu.section === "folderItem" && contextMenu.folderId && (
+            <>
+              <button
+                className={styles.menuItem}
+                onClick={() => {
+                  const fid = contextMenu.folderId!;
+                  setNewFolderParentId(fid);
+                  setNewFolderName("새 폴더");
+                  setExpandedFolders((prev) => {
+                    const n = new Set(prev);
+                    n.add(fid);
+                    return n;
+                  });
+                  setContextMenu(null);
+                }}
+              >
+                하위 폴더 만들기
+              </button>
+              <div className={styles.menuDivider} />
+              <button
+                className={styles.menuItem}
+                onClick={() => {
+                  setRenamingFolderId(contextMenu.folderId!);
+                  setRenamingFolderValue(contextMenu.folderName ?? "");
+                  setContextMenu(null);
+                }}
+              >
+                이름 변경
+              </button>
+              <div className={styles.menuDivider} />
+              <button
+                className={`${styles.menuItem} ${styles.menuItemDanger}`}
+                onClick={() => menuDeleteFolder(contextMenu.folderId!, contextMenu.folderName ?? "")}
+              >
+                삭제
               </button>
             </>
           )}

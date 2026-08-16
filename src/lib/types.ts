@@ -309,6 +309,18 @@ export interface RunState {
 }
 
 // ---------------------------------------------------------------------------
+// 폴더 (folders) — 문서 임의 하이라키 (schema.md §folders)
+// ---------------------------------------------------------------------------
+
+export interface Folder {
+  id: string;
+  name: string;
+  /** 상위 폴더 id. null=루트 직속 */
+  parentId: string | null;
+  createdAt: number;
+}
+
+// ---------------------------------------------------------------------------
 // 문서
 // ---------------------------------------------------------------------------
 
@@ -316,6 +328,8 @@ export interface Document {
   id: string;
   name: string;
   currentVersion: number;
+  /** 소속 폴더(null=루트) */
+  folderId: string | null;
   createdAt: number;
 }
 

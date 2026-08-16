@@ -11,6 +11,7 @@ import {
   documents,
   documentVersions,
   edges,
+  folders,
   nodeRuns,
   nodes,
   runs,
@@ -27,6 +28,7 @@ import type {
   DocumentDetail,
   DocumentVersion,
   EdgeRow,
+  Folder,
   Graph,
   MountRef,
   NodeConfig,
@@ -248,12 +250,13 @@ export function createDocument(
   content: string,
   author: "human" | "llm" = "human",
   note?: string,
+  folderId?: string | null,
 ): DocumentDetail {
   const ts = now();
   const docId = nanoid();
   db.transaction((tx) => {
     tx.insert(documents)
-      .values({ id: docId, name, currentVersion: 1, createdAt: ts })
+      .values({ id: docId, name, currentVersion: 1, folderId: folderId ?? null, createdAt: ts })
       .run();
     tx.insert(documentVersions)
       .values({
@@ -267,7 +270,7 @@ export function createDocument(
       })
       .run();
   });
-  return { id: docId, name, currentVersion: 1, createdAt: ts, content };
+  return { id: docId, name, currentVersion: 1, folderId: folderId ?? null, createdAt: ts, content };
 }
 
 /** 새 버전 추가 → current_version 갱신. author 기본 'human'. */
@@ -339,6 +342,120 @@ export function getCurrentDocumentVersion(
     )
     .get();
   return ver ? toDocumentVersion(ver) : null;
+}
+
+// ===========================================================================
+// folders — 문서 임의 폴더 하이라키 (schema.md §folders)
+// ===========================================================================
+
+export function listFolders(): Folder[] {
+  return db
+    .select()
+    .from(folders)
+    .orderBy(asc(folders.createdAt))
+    .all()
+    .map(toFolder);
+}
+
+export function createFolder(name: string, parentId?: string | null): Folder {
+  const row = {
+    id: nanoid(),
+    name,
+    parentId: parentId ?? null,
+    createdAt: now(),
+  };
+  db.insert(folders).values(row).run();
+  return toFolder(row);
+}
+
+export function renameFolder(id: string, name: string): Folder | null {
+  db.update(folders).set({ name }).where(eq(folders.id, id)).run();
+  const row = db.select().from(folders).where(eq(folders.id, id)).get();
+  return row ? toFolder(row) : null;
+}
+
+/**
+ * 폴더 삭제 정책(schema.md §folders):
+ *   - 하위 문서: folder_id → null(루트 이동, 비파괴)
+ *   - 하위 폴더: parent_id → 삭제 폴더의 parent_id(조부모로 승격)
+ *   - 그 후 폴더 행 삭제
+ * 트랜잭션으로 원자 처리. 존재하지 않으면 false.
+ */
+export function deleteFolder(id: string): boolean {
+  const target = db.select().from(folders).where(eq(folders.id, id)).get();
+  if (!target) return false;
+
+  db.transaction((tx) => {
+    // 하위 문서 → 루트(null)로 이동
+    tx.update(documents)
+      .set({ folderId: null })
+      .where(eq(documents.folderId, id))
+      .run();
+
+    // 하위 폴더 → 조부모(target.parentId)로 승격
+    tx.update(folders)
+      .set({ parentId: target.parentId })
+      .where(eq(folders.parentId, id))
+      .run();
+
+    // 폴더 행 삭제
+    tx.delete(folders).where(eq(folders.id, id)).run();
+  });
+
+  return true;
+}
+
+/**
+ * 문서의 folder_id 갱신.
+ * folderId가 non-null이면 해당 폴더 존재 여부를 검증한다.
+ * 존재하지 않는 문서이거나 폴더가 없으면 false.
+ */
+export function moveDocument(docId: string, folderId: string | null): boolean {
+  const doc = db.select().from(documents).where(eq(documents.id, docId)).get();
+  if (!doc) return false;
+
+  if (folderId !== null) {
+    const folder = db.select().from(folders).where(eq(folders.id, folderId)).get();
+    if (!folder) return false;
+  }
+
+  db.update(documents)
+    .set({ folderId })
+    .where(eq(documents.id, docId))
+    .run();
+  return true;
+}
+
+/**
+ * 폴더의 parent_id 갱신.
+ * 순환 금지: parentId가 자기 자신이거나 자신의 후손이면 거부(false 반환).
+ * parentId가 non-null이면 대상 폴더 존재 여부도 검증.
+ */
+export function moveFolder(id: string, parentId: string | null): boolean {
+  const target = db.select().from(folders).where(eq(folders.id, id)).get();
+  if (!target) return false;
+
+  if (parentId !== null) {
+    // 자기 자신으로 이동 불가
+    if (parentId === id) return false;
+
+    // parentId가 실제 존재하는지 확인
+    const newParent = db.select().from(folders).where(eq(folders.id, parentId)).get();
+    if (!newParent) return false;
+
+    // 순환 방지: parentId가 자신의 후손인지 조상 체인 순회로 판정
+    // parentId의 조상을 따라 올라가며 id가 나오면 순환 → 거부
+    let cursor: string | null = newParent.parentId;
+    while (cursor !== null) {
+      if (cursor === id) return false; // id가 parentId의 조상 체인에 존재 → 순환
+      const row = db.select().from(folders).where(eq(folders.id, cursor)).get();
+      if (!row) break; // 끊김(방어)
+      cursor = row.parentId;
+    }
+  }
+
+  db.update(folders).set({ parentId }).where(eq(folders.id, id)).run();
+  return true;
 }
 
 // ===========================================================================
@@ -953,6 +1070,17 @@ function toDocument(r: DocumentDbRow): Document {
     id: r.id,
     name: r.name,
     currentVersion: r.currentVersion,
+    folderId: r.folderId ?? null,
+    createdAt: r.createdAt,
+  };
+}
+
+type FolderDbRow = typeof folders.$inferSelect;
+function toFolder(r: FolderDbRow): Folder {
+  return {
+    id: r.id,
+    name: r.name,
+    parentId: r.parentId ?? null,
     createdAt: r.createdAt,
   };
 }

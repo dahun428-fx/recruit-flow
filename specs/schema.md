@@ -137,6 +137,25 @@ M4 재설계(2026-08-15): 참조+오버라이드 시맨틱(결정 1), 장착 칩
 에이전트 접근은 `get_document(id)`/`search_documents` tool(결정 7).
 챗봇 `edit_document` tool로 수정 시 매 성공마다 새 버전 생성(author=llm).
 
+**`documents.folder_id`** (M5, v2→현행 승격, 2026-08-16): text nullable —
+문서가 속한 폴더(null=루트). FK→`folders.id`이나 SQLite `ADD COLUMN` 한계로
+**앱 레벨 강제**(Input `config.documentId` 참조와 동일 정책). 마이그레이션
+0004에서 비파괴 `ADD COLUMN`, 기존 문서 전부 null(루트).
+
+### folders — 문서 임의 폴더 하이라키 (M5, v2→현행 승격)
+
+| 컬럼 | 타입 | 비고 |
+| --- | --- | --- |
+| id | text PK | |
+| name | text | 폴더 이름 |
+| parent_id | text nullable | 상위 폴더(null=루트 직속). FK→folders.id, 앱 레벨 강제. 순환 금지(자기·후손으로 이동 불가) |
+| created_at | integer | |
+
+블록 구획의 타입 폴더(에이전트/자료…)·프로젝트/실행기록 폴더와 **별개의
+사용자 임의 폴더**이며 **문서 구획에만** 적용. 빈 폴더 1급 지원. 폴더 삭제
+시 하위 문서는 **루트로 이동**(비파괴 — 문서는 파이프라인 Input이 참조하는
+실데이터), 하위 폴더는 조부모로 승격. 같은 부모 내 동명은 허용(경고만).
+
 ### chat_messages
 
 | 컬럼 | 타입 | 비고 |

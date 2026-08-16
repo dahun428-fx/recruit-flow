@@ -6,6 +6,7 @@ import type {
   Document,
   DocumentDetail,
   EdgeRow,
+  Folder,
   Graph,
   NodeConfig,
   NodeRow,
@@ -116,4 +117,39 @@ export const api = {
     fetch(`/api/documents/${id}`, { method: "DELETE" }).then((r) =>
       json<{ ok: boolean }>(r),
     ),
+  /** 문서를 지정 폴더로 이동. folderId=null이면 루트로 이동. */
+  moveDocument: (id: string, folderId: string | null) =>
+    fetch(`/api/documents/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folderId }),
+    }).then((r) => json<{ ok: boolean }>(r)),
+
+  // -------------------------------------------------------------------------
+  // 폴더
+  // -------------------------------------------------------------------------
+  listFolders: () =>
+    fetch("/api/folders").then((r) => json<Folder[]>(r)),
+  createFolder: (name: string, parentId?: string | null) =>
+    fetch("/api/folders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, parentId }),
+    }).then((r) => json<Folder>(r)),
+  renameFolder: (id: string, name: string) =>
+    fetch(`/api/folders/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }).then((r) => json<Folder>(r)),
+  deleteFolder: (id: string) =>
+    fetch(`/api/folders/${id}`, { method: "DELETE" }).then((r) =>
+      json<{ ok: boolean }>(r),
+    ),
+  moveFolder: (id: string, parentId: string | null) =>
+    fetch(`/api/folders/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parentId }),
+    }).then((r) => json<Folder>(r)),
 };

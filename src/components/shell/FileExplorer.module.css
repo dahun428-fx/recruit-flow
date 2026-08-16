@@ -617,6 +617,13 @@
   border-radius: 3px;
 }
 
+/* ══ 폴더 드롭 오버 하이라이트 ══ */
+.folderDragOver {
+  background: #eef1ff !important;
+  outline: 1.5px dashed var(--c-agent);
+  outline-offset: -2px;
+}
+
 /* ══ 확인 팝업 ══ */
 .confirmPopup {
   position: fixed;
