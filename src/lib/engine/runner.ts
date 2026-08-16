@@ -39,6 +39,7 @@ import { eventBus } from "./events";
 import { buildGateContext, evaluateGate, GateExprError } from "./gate";
 import { humanWait, type HumanApproval } from "./human";
 import { runInputNode } from "./input-node";
+import { getCurrentUserId, runWithUser } from "../auth/context";
 import { deriveMounts } from "./mount";
 import { runOutputNode } from "./output-node";
 import { finalizeArtifact, createArtifact } from "../db/queries";
@@ -61,6 +62,14 @@ const keyOf = (nodeId: string, iteration: number): NodeKey =>
 interface RunControl {
   runId: string;
   pipelineId: string;
+  /**
+   * 소유자 id(R3, auth.md §5). start/startFrom가 요청 컨텍스트에서
+   * getCurrentUserId()로 확보해 각인한다. launch()의 fire-and-forget drive는
+   * 요청 컨텍스트가 사라진 뒤에도 계속 DB를 쓰므로, 이 값으로 runWithUser를
+   * 다시 걸어 백그라운드 쓰기도 owner ALS 스코프(슬라이스 4의 예약 커넥션+GUC)
+   * 를 받게 한다. 반드시 요청 컨텍스트에서 채우고, 백그라운드에서 읽지 않는다.
+   */
+  ownerId: string;
   index: GraphIndex;
   snapshot: Graph;
   /** (nodeId,iteration) → nodeRunId. */
@@ -100,6 +109,10 @@ class Runner {
   // =========================================================================
 
   async start(pipelineId: string): Promise<RunStartResult> {
+    // R3: 요청 컨텍스트에서 소유자를 확보해 control에 각인한다. createRun도 같은
+    // 컨텍스트에서 owner_id를 각인하므로 둘이 항상 일치한다. 백그라운드 drive는
+    // 이 값으로 runWithUser를 다시 건다(launch 참조).
+    const ownerId = getCurrentUserId();
     const graph = await getGraph(pipelineId);
 
     // engine.md §1: 스냅샷 생성 시 참조를 resolve — 각 노드 config를 완결화하고
@@ -115,7 +128,7 @@ class Runner {
     if (errors.length > 0) return { errors };
 
     const run = await createRun(pipelineId, snapshot, null);
-    const control = this.buildControl(run.id, pipelineId, snapshot);
+    const control = this.buildControl(run.id, pipelineId, snapshot, ownerId);
 
     // 루트 노드(상류 없는 flow 노드)만 초기 큐잉 — node_run 생성.
     // 장착 계층 노드(skill/rule/tool)는 실행 대상이 아니므로 node_run을 만들지
@@ -147,6 +160,8 @@ class Runner {
     fromNodeId: string,
     upstreamRunId: string,
   ): Promise<RunStartResult> {
+    // R3: start와 동일 — 요청 컨텍스트에서 소유자 각인.
+    const ownerId = getCurrentUserId();
     const liveGraph = await getGraph(pipelineId);
 
     // 부분 재실행도 현재 그래프를 resolve해 완결 스냅샷으로 고정(engine.md §1).
@@ -172,7 +187,7 @@ class Runner {
     const copyTargets = [...closure].filter((id) => index.nodeById.has(id));
     const copied = await copyUpstreamArtifacts(run.id, upstreamRunId, copyTargets);
 
-    const control = this.buildControl(run.id, pipelineId, graph);
+    const control = this.buildControl(run.id, pipelineId, graph, ownerId);
     // 복사된 노드는 succeeded로 표시(재실행 안 함) + nodeRun id 매핑 확보.
     const copiedSet = new Set(copied);
     await this.hydrateCopiedNodeRuns(control, copiedSet);
@@ -196,10 +211,16 @@ class Runner {
     return { runId: run.id };
   }
 
-  private buildControl(runId: string, pipelineId: string, graph: Graph): RunControl {
+  private buildControl(
+    runId: string,
+    pipelineId: string,
+    graph: Graph,
+    ownerId: string,
+  ): RunControl {
     return {
       runId,
       pipelineId,
+      ownerId,
       index: indexGraph(graph.nodes, graph.edges),
       snapshot: graph,
       nodeRunIdByKey: new Map(),
@@ -269,11 +290,17 @@ class Runner {
 
   /** 백그라운드 루프 시작(fire-and-forget). 예외는 내부 격리, 마지막 방어선만. */
   private launch(control: RunControl): void {
-    void this.drive(control).catch((e) => {
-      // eslint-disable-next-line no-console
-      console.error(`[runner] drive crashed for run ${control.runId}:`, e);
-      void this.finalizeRun(control, "failed").catch(() => {});
-    });
+    // R3: fire-and-forget drive는 요청 컨텍스트 밖에서 계속 DB를 쓴다(node_runs·
+    // artifacts·run status·chat card). control.ownerId로 owner ALS 스코프를 다시
+    // 걸어야 슬라이스 4의 예약 커넥션+GUC를 통해 앱필터·RLS를 동일하게 받는다.
+    // runWithUser는 promise를 반환하지만 여기서도 await하지 않는다(fire-and-forget 유지).
+    void runWithUser(control.ownerId, () =>
+      this.drive(control).catch((e) => {
+        // eslint-disable-next-line no-console
+        console.error(`[runner] drive crashed for run ${control.runId}:`, e);
+        return this.finalizeRun(control, "failed").catch(() => {});
+      }),
+    );
   }
 
   /**
@@ -821,11 +848,18 @@ class Runner {
     const snapshot = await getRunSnapshot(run.id);
     if (!snapshot) return false;
 
+    // R3: 재하이드레이션 continuation(runHuman·이후 drive)은 요청 반환 후에도
+    // 백그라운드에서 DB를 쓴다. approve 라우트가 이미 owner를 검증했지만, control이
+    // 실어 나를 소유자는 run 자신의 owner_id로 고정한다(백필 뒤 non-null 기대).
+    // 레거시 null이면 방어적으로 재개 불가 처리(중단 없이 false 반환).
+    if (!run.ownerId) return false;
+    const ownerId = run.ownerId;
+
     // 크래시로 남은 형제 node_run(running/queued)을 먼저 마감 — 재구성한 control이
     // 이들을 실행 중으로 오인해 중복 실행/유령 행을 남기지 않도록(대기 노드는 유지).
     await this.cleanupStaleSiblings(run.id);
 
-    const control = this.buildControl(run.id, run.pipelineId, snapshot);
+    const control = this.buildControl(run.id, run.pipelineId, snapshot, ownerId);
     // DB의 node_run 상태로 control 복원.
     const rows = await db
       .select()
@@ -867,11 +901,14 @@ class Runner {
     //   succeeded가 되고 드라이버는 waitForWake에 영원히 머문다 — 재시작 후
     //   승인 시 파이프라인이 재개되지 않는 결함이었다.
     control.handled.add(keyOf(humanNr.nodeId, humanNr.iteration));
-    void this.runHuman(control, node, nodeRunId, humanNr.iteration)
-      .catch(() => {})
-      .finally(() => {
-        control.wake?.();
-      });
+    // R3: 이 runHuman continuation도 요청 반환 후 백그라운드에서 쓰므로 owner 스코프로 감싼다.
+    void runWithUser(control.ownerId, () =>
+      this.runHuman(control, node, nodeRunId, humanNr.iteration)
+        .catch(() => {})
+        .finally(() => {
+          control.wake?.();
+        }),
+    );
     this.launch(control);
     return true;
   }
@@ -1158,25 +1195,31 @@ class Runner {
    * rehydrateForApproval로 재구성한다.
    */
   async recoverOnBoot(): Promise<void> {
+    // R3: 부팅은 시스템 컨텍스트(요청·ALS 없음)다. BYPASSRLS 시스템 롤을 쓰지 않고
+    // (auth.md §5), 마감 대상 run의 owner_id를 읽어 각 run의 DB 쓰기를 그 owner의
+    // runWithUser로 다시 감싼다. 백필 뒤 null이면 안 되지만, 레거시 null은 조용히
+    // 건너뛴다(throw 금지).
     const runningRuns = await db
-      .select({ id: runsTable.id })
+      .select({ id: runsTable.id, ownerId: runsTable.ownerId })
       .from(runsTable)
       .where(eq(runsTable.status, "running"));
     for (const r of runningRuns) {
       if (this.controls.has(r.id)) continue;
-      await this.forceFinalizeOrphan(r.id, "failed");
+      if (!r.ownerId) continue; // 레거시 null → skip(닫힌 실패, 마감 보류)
+      await runWithUser(r.ownerId, () => this.forceFinalizeOrphan(r.id, "failed"));
     }
     // waiting_human run은 복원 유지(마감 안 함) — approve로 재개. 단, 크래시로
     // 남은 병렬 형제 node_run(running/queued)은 인메모리 실행이 사라져 재개
     // 불가하므로 failed로 마감한다(재개 시 중복 실행·유령 행 방지). 대기 노드
     // (status=waiting_human) 자체는 건드리지 않는다.
     const waitingRuns = await db
-      .select({ id: runsTable.id })
+      .select({ id: runsTable.id, ownerId: runsTable.ownerId })
       .from(runsTable)
       .where(eq(runsTable.status, "waiting_human"));
     for (const r of waitingRuns) {
       if (this.controls.has(r.id)) continue;
-      await this.cleanupStaleSiblings(r.id);
+      if (!r.ownerId) continue; // 레거시 null → skip
+      await runWithUser(r.ownerId, () => this.cleanupStaleSiblings(r.id));
     }
   }
 

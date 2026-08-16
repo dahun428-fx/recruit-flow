@@ -88,6 +88,17 @@ resolveUserId(req): Promise<string>  // ★ 유일한 스왑 지점.
 - **커넥션 점유:** 요청은 짧아 무해. 러너 `drive()`는 run 1건당 예약 1개를
   점유(로컬·소수 run이라 허용). 스케일아웃(워커 분리)은 v2.
 
+**★ 슬라이스 4 함정 — 챗 라우트 fire-and-forget × 예약 커넥션 생명주기**:
+`POST /pipelines/[id]/chat`는 `runChat`를 fire-and-forget IIFE로 띄우고 즉시 200을
+반환한다(chat/route.ts). 슬라이스 3(순수 ALS)에선 store가 detached IIFE로 전파돼
+무해하나, 슬라이스 4에서 `runWithUser` finally가 예약 커넥션을 `RESET`+`release`하면,
+아직 실행 중인 `runChat`→`trigger_run`→`runner.start`의 `createRun`·검증 쿼리가
+**이미 반납된 예약 커넥션**에서 돌아 GUC가 사라진다. 대책(슬라이스 4에서 택1):
+(a) chat 라우트가 `runChat` 완료까지 `runWithUser` 스코프를 유지(await), 또는
+(b) `runner.start`가 자체 `runWithUser(ownerId)`로 새 예약 커넥션을 세우고 시작
+쿼리를 그 안에서 실행. `launch`의 drive는 이미 (b)로 새 스코프를 여므로 그 앞의
+`createRun`·검증도 같은 스코프로 끌어오면 된다. R3 리뷰 지적사항.
+
 **롤·마이그레이션 분리:**
 - 롤 `rf_app` 생성은 클러스터 전역·환경별 → **마이그레이션 밖
   `scripts/pg-bootstrap.mts`**(멱등). 마이그레이션은 컬럼·정책·인덱스만.
