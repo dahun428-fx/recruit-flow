@@ -171,6 +171,7 @@ export function AgentForm({
               JSON 스키마
             </FieldLabel>
             <textarea
+              className={panelStyles.code}
               value={config.jsonSchema ?? ""}
               placeholder='{ "score": "number", "issues": "string[]" }'
               onChange={(e) =>
@@ -340,6 +341,7 @@ export function InputForm({
             인라인 텍스트
           </FieldLabel>
           <textarea
+            className={panelStyles.code}
             value={config.inlineText ?? ""}
             placeholder="문서 대신 직접 입력…"
             onChange={(e) =>
@@ -555,6 +557,7 @@ export function SkillForm({
         내용
       </FieldLabel>
       <textarea
+        className={panelStyles.code}
         value={config.content}
         placeholder="예: ## 채점 가이드라인&#10;- 성과는 숫자로 표현…"
         rows={8}
@@ -583,6 +586,7 @@ export function RuleForm({
         내용
       </FieldLabel>
       <textarea
+        className={panelStyles.code}
         value={config.content}
         placeholder="예: ## 제약 규칙&#10;- 성과는 반드시 숫자로…"
         rows={8}

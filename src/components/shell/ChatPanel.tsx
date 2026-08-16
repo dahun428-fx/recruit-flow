@@ -4,13 +4,17 @@
 // 자동 팝업 없음. 캔버스 Human 노드 클릭 → 펼치며 해당 카드 스크롤.
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { marked } from "marked";
 import { useCanvasStore } from "@/store/canvas";
 import { rememberActiveRun } from "@/hooks/useRunStream";
 import type { ChatMessage, RunState } from "@/lib/types";
 import { usePipelineStream } from "@/hooks/usePipelineStream";
 import { Resizer } from "@/components/shell/Resizer";
 import styles from "./ChatPanel.module.css";
+
+// TabEditor와 동일한 marked 설정 적용
+marked.setOptions({ gfm: true, breaks: false, async: false });
 
 // ──────────────────────────────────────────────────────────
 // payload 타입들
@@ -293,16 +297,13 @@ export function ChatPanel({ size, onResizerMouseDown }: Props) {
             />
           ))}
           {streamingText !== null && (
-            <div className={`${styles.card} ${styles.assistant}`}>
-              <div className={styles.kind}>챗봇</div>
-              <div className={styles.text}>
-                {streamingText}
-                <span className={styles.cursor} />
-              </div>
-            </div>
+            <StreamingAssistantCard text={streamingText} />
           )}
           <div ref={bottomRef} />
         </div>
+
+        {/* 퀵액션 칩 */}
+        <QuickChips onSelect={setInputText} inputRef={inputRef} />
 
         {/* 입력창 */}
         <div className={styles.input}>
@@ -383,6 +384,8 @@ function AssistantCard({
   cardRef: (el: HTMLDivElement | null) => void;
 }) {
   const p = msg.payload as AssistantPayload;
+  // TabEditor의 marked.parse → dangerouslySetInnerHTML 패턴 동일하게 재사용
+  const html = useMemo(() => marked.parse(p.text) as string, [p.text]);
   return (
     <div
       ref={cardRef}
@@ -391,7 +394,72 @@ function AssistantCard({
       data-kind="assistant"
     >
       <div className={styles.kind}>챗봇</div>
-      <div className={styles.text}>{p.text}</div>
+      <div
+        className={styles.mdBody}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    </div>
+  );
+}
+
+/** 스트리밍 중인 assistant 메시지 — 마크다운 실시간 렌더 + 커서 */
+function StreamingAssistantCard({ text }: { text: string }) {
+  const html = useMemo(() => marked.parse(text) as string, [text]);
+  return (
+    <div className={`${styles.card} ${styles.assistant}`}>
+      <div className={styles.kind}>챗봇</div>
+      <div
+        className={styles.mdBody}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+      <span className={styles.cursor} />
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────
+// 퀵액션 칩 상수 및 컴포넌트
+// ──────────────────────────────────────────────────────────
+
+const QUICK_CHIPS: { label: string; prefill: string }[] = [
+  { label: "새 에이전트", prefill: "새 에이전트 블록 만들어줘 — 역할: " },
+  { label: "자료", prefill: "새 자료(Input) 블록 만들어줘 — 설명: " },
+  { label: "도구", prefill: "새 도구(Tool) 블록 만들어줘 — 이름: " },
+  { label: "관문", prefill: "새 관문(Gate) 블록 만들어줘 — 평가 기준: " },
+  { label: "내 검토", prefill: "새 Human 검토 블록 만들어줘 — 안내문: " },
+  { label: "작성해줘", prefill: "지금 파이프라인을 실행해서 이력서를 작성해줘" },
+];
+
+function QuickChips({
+  onSelect,
+  inputRef,
+}: {
+  onSelect: (text: string) => void;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+}) {
+  return (
+    <div className={styles.chips}>
+      {QUICK_CHIPS.map((chip) => (
+        <button
+          key={chip.label}
+          className={styles.chip}
+          onClick={() => {
+            onSelect(chip.prefill);
+            setTimeout(() => {
+              inputRef.current?.focus();
+              // 커서를 맨 끝으로 이동
+              const el = inputRef.current;
+              if (el) {
+                const len = chip.prefill.length;
+                el.setSelectionRange(len, len);
+              }
+            }, 0);
+          }}
+          type="button"
+        >
+          {chip.label}
+        </button>
+      ))}
     </div>
   );
 }

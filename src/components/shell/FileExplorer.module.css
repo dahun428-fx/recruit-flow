@@ -590,6 +590,33 @@
   vertical-align: middle;
 }
 
+/* ══ 드래그 커스텀 이미지 칩 ══ */
+.dragChip {
+  position: absolute;
+  top: -9999px;
+  left: -9999px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px 4px 8px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #d0d5dd);
+  border-radius: 99px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  font-size: 12px;
+  font-family: inherit;
+  color: #38404d;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.dragChipDot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 3px;
+}
+
 /* ══ 확인 팝업 ══ */
 .confirmPopup {
   position: fixed;

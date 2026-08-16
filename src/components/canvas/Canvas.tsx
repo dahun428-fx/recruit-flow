@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
   Controls,
+  Panel,
   ReactFlow,
   type Connection,
   type Edge,
@@ -94,6 +95,12 @@ interface ContextMenu {
   y: number;
 }
 
+interface EdgeContextMenu {
+  edgeId: string;
+  x: number;
+  y: number;
+}
+
 export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeClick }: Props) {
   const pipelineId = useCanvasStore((s) => s.pipelineId);
   const nodes = useCanvasStore((s) => s.nodes);
@@ -127,6 +134,7 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
   }, [nodesInitialized, rf]);
 
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
+  const [edgeContextMenu, setEdgeContextMenu] = useState<EdgeContextMenu | null>(null);
   const [partialRunning, setPartialRunning] = useState(false);
   const [partialError, setPartialError] = useState<string | null>(null);
 
@@ -165,6 +173,7 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
   useEffect(() => {
     function onDown() {
       setContextMenu(null);
+      setEdgeContextMenu(null);
     }
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
@@ -433,10 +442,117 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
       const execNode = nodes.find((n) => n.id === node.id);
       if (!execNode) return;
       if ((MOUNT_NODE_TYPES as string[]).includes(execNode.type)) return;
+      setEdgeContextMenu(null); // 엣지 메뉴 닫기
       setContextMenu({ nodeId: node.id, x: e.clientX, y: e.clientY });
     },
     [nodes],
   );
+
+  // ── 엣지 우클릭 → "선 삭제" 컨텍스트 메뉴 ──
+  const onEdgeContextMenu = useCallback(
+    (e: React.MouseEvent, edge: Edge) => {
+      e.preventDefault();
+      setContextMenu(null); // 노드 메뉴 닫기
+      setEdgeContextMenu({ edgeId: edge.id, x: e.clientX, y: e.clientY });
+    },
+    [],
+  );
+
+  const handleDeleteEdge = useCallback(() => {
+    if (!edgeContextMenu) return;
+    removeEdge(edgeContextMenu.edgeId);
+    setEdgeContextMenu(null);
+    scheduleSave();
+  }, [edgeContextMenu, removeEdge, scheduleSave]);
+
+  // ── 자동정렬 ──
+  const handleAutoLayout = useCallback(() => {
+    if (readOnly) return;
+    const state = useCanvasStore.getState();
+    const allNodes = state.nodes.filter(
+      (n) => !(MOUNT_NODE_TYPES as string[]).includes(n.type),
+    );
+    const flowEdges = state.edges.filter((e) => e.kind === "flow");
+
+    // 인접 리스트 구성
+    const children: Record<string, string[]> = {};
+    const parents: Record<string, string[]> = {};
+    for (const n of allNodes) {
+      children[n.id] = [];
+      parents[n.id] = [];
+    }
+    for (const e of flowEdges) {
+      if (children[e.sourceNodeId] !== undefined) {
+        children[e.sourceNodeId].push(e.targetNodeId);
+      }
+      if (parents[e.targetNodeId] !== undefined) {
+        parents[e.targetNodeId].push(e.sourceNodeId);
+      }
+    }
+
+    // BFS로 depth(column) 계산 — longest path semantics
+    const depth: Record<string, number> = {};
+    const inDegree: Record<string, number> = {};
+    for (const n of allNodes) {
+      inDegree[n.id] = parents[n.id].length;
+    }
+    const queue: string[] = allNodes
+      .filter((n) => inDegree[n.id] === 0)
+      .map((n) => n.id);
+    for (const id of queue) {
+      depth[id] = 0;
+    }
+    const visited = new Set<string>(queue);
+    let qi = 0;
+    while (qi < queue.length) {
+      const cur = queue[qi++];
+      for (const child of children[cur]) {
+        const newDepth = (depth[cur] ?? 0) + 1;
+        if (depth[child] === undefined || depth[child] < newDepth) {
+          depth[child] = newDepth;
+        }
+        if (!visited.has(child)) {
+          visited.add(child);
+          queue.push(child);
+        }
+      }
+    }
+
+    // 고립 노드(방문 안된 노드) → max_depth + 1 열에 배치
+    const maxDepth = Object.values(depth).reduce((m, d) => Math.max(m, d), -1);
+    for (const n of allNodes) {
+      if (depth[n.id] === undefined) {
+        depth[n.id] = maxDepth + 1;
+      }
+    }
+
+    // depth별 노드 그룹핑
+    const byDepth: Record<number, string[]> = {};
+    for (const n of allNodes) {
+      const d = depth[n.id];
+      if (!byDepth[d]) byDepth[d] = [];
+      byDepth[d].push(n.id);
+    }
+
+    // 레이아웃 상수
+    const X_GAP = 260;
+    const Y_GAP = 130;
+    const START_X = 80;
+    const START_Y = 80;
+
+    // 좌표 계산 및 노드 이동
+    for (const [dStr, ids] of Object.entries(byDepth)) {
+      const d = Number(dStr);
+      const x = START_X + d * X_GAP;
+      ids.forEach((id, idx) => {
+        const y = START_Y + idx * Y_GAP;
+        moveNode(id, x, y);
+      });
+    }
+
+    scheduleSave();
+    rf.fitView({ padding: 0.2 });
+  }, [readOnly, moveNode, scheduleSave, rf]);
 
   const startPartialRun = useCallback(async () => {
     if (!pipelineId || !contextMenu) return;
@@ -500,6 +616,7 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
           setContextMenu(null);
         }}
         onNodeContextMenu={readOnly ? undefined : onNodeContextMenu}
+        onEdgeContextMenu={readOnly ? undefined : onEdgeContextMenu}
         fitView
         deleteKeyCode={readOnly ? [] : ["Backspace", "Delete"]}
         nodesDraggable={!readOnly}
@@ -509,6 +626,18 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
       >
         <Background gap={22} color="#d6dae2" />
         <Controls showInteractive={false} />
+        {!readOnly && (
+          <Panel position="bottom-left" className={styles.layoutPanel}>
+            <button
+              className={styles.layoutBtn}
+              onClick={handleAutoLayout}
+              disabled={readOnly}
+              title="노드를 흐름 순서대로 자동 정렬합니다"
+            >
+              자동정렬
+            </button>
+          </Panel>
+        )}
       </ReactFlow>
 
       {contextMenu && (
@@ -523,6 +652,21 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
             data-tip="이 노드부터 하류만 재실행. 상류 아티팩트는 직전 완료 run에서 복사합니다"
           >
             {partialRunning ? "재실행 중…" : "이 노드부터 재실행"}
+          </button>
+        </div>
+      )}
+
+      {edgeContextMenu && (
+        <div
+          className={styles.contextMenu}
+          style={{ left: edgeContextMenu.x, top: edgeContextMenu.y }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={handleDeleteEdge}
+            data-tip="이 연결선을 삭제합니다"
+          >
+            선 삭제
           </button>
         </div>
       )}

@@ -1,7 +1,7 @@
 // 파일 탐색기 — 좌측 영역.
 // M4 후속: 프로젝트(파이프라인) 최상위 트리 추가. Windows 파일 탐색기 시각.
 // 블록·문서·실행기록은 프로젝트 구획 아래로 재배치.
-// 저장된 블록 정의 더블클릭 추가 제거 — 드래그 + 우클릭으로 일원화.
+// 저장된 블록 정의 클릭 동작: 더블클릭=정의 탭 열기, 단일클릭=no-op.
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -50,6 +50,40 @@ const MOUNT_TYPES = ["skill", "rule", "tool"];
 
 /** 아직 서버에 생성하지 않은 "대기 중" 문서 행의 가짜 ID */
 const NEW_DOC_SENTINEL = "__new_doc__";
+
+/**
+ * 드래그 시 브라우저 기본 고스트 대신 깔끔한 pill 칩을 보여주는 헬퍼.
+ * 화면 밖 임시 DOM 요소를 만들어 setDragImage 지정 후 다음 틱에 제거한다.
+ */
+function setDragChip(
+  e: React.DragEvent,
+  label: string,
+  dotColor: string,
+  dotRadius: number,
+): void {
+  const chip = document.createElement("div");
+  chip.style.cssText =
+    "position:absolute;top:-9999px;left:-9999px;" +
+    "display:flex;align-items:center;gap:5px;" +
+    "padding:4px 10px 4px 8px;" +
+    "background:#fff;border:1px solid #d0d5dd;border-radius:99px;" +
+    "box-shadow:0 2px 8px rgba(0,0,0,0.12);" +
+    "font:12px/1.4 inherit;color:#38404d;white-space:nowrap;pointer-events:none;";
+
+  const dot = document.createElement("span");
+  dot.style.cssText =
+    `width:7px;height:7px;flex:none;border-radius:${dotRadius}px;background:${dotColor};`;
+
+  const text = document.createElement("span");
+  text.textContent = label;
+
+  chip.appendChild(dot);
+  chip.appendChild(text);
+  document.body.appendChild(chip);
+
+  e.dataTransfer.setDragImage(chip, chip.offsetWidth / 2, chip.offsetHeight / 2);
+  setTimeout(() => chip.remove(), 0);
+}
 
 /** 확인 팝업 state. */
 interface ConfirmState {
@@ -896,6 +930,12 @@ export function FileExplorer({
                             onDragStart={(e) => {
                               e.dataTransfer.setData(DRAG_MIME, `${type}:empty-${type}`);
                               e.dataTransfer.effectAllowed = "copy";
+                              setDragChip(
+                                e,
+                                `빈 ${TYPE_LABELS[type] ?? type}`,
+                                color,
+                                isMountType ? 99 : 3,
+                              );
                             }}
                             onDoubleClick={(e) => {
                               e.stopPropagation();
@@ -921,7 +961,7 @@ export function FileExplorer({
                             <span className={styles.itemName}>빈 {TYPE_LABELS[type] ?? type}</span>
                           </div>
                         )}
-                        {/* 저장된 정의 항목 — 더블클릭 제거, 클릭=정의 탭 열기 */}
+                        {/* 저장된 정의 항목 — 더블클릭=정의 탭 열기, 단일클릭=no-op */}
                         {items.map((def) => {
                           const isRenaming = renamingId === def.id;
                           const isPendingNew = pendingOpenDefRef.current?.id === def.id;
@@ -937,12 +977,19 @@ export function FileExplorer({
                                       e.dataTransfer.setData(DRAG_MIME, `${def.type}:def-${def.id}`);
                                       e.dataTransfer.setData("application/x-rf-blockdef-id", def.id);
                                       e.dataTransfer.effectAllowed = "copy";
+                                      setDragChip(
+                                        e,
+                                        def.name,
+                                        color,
+                                        isMountType ? 99 : 3,
+                                      );
                                     }
                                   : undefined
                               }
-                              onClick={() => {
+                              onDoubleClick={(e) => {
+                                e.stopPropagation();
                                 if (isRenaming) return;
-                                // 클릭 = 정의 탭 열기 (더블클릭 추가 제거)
+                                // 더블클릭 = 정의 탭 열기
                                 onOpenBlockDef?.(def.id, def.name);
                               }}
                               onContextMenu={(e) =>
@@ -1039,6 +1086,12 @@ export function FileExplorer({
                             ? (e) => {
                                 e.dataTransfer.setData(TRAY_DRAG_MIME, def.id);
                                 e.dataTransfer.effectAllowed = "copy";
+                                setDragChip(
+                                  e,
+                                  def.name,
+                                  color,
+                                  isMountType ? 99 : 3,
+                                );
                               }
                             : undefined
                         }

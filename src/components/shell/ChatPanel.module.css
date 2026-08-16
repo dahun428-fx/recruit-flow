@@ -150,6 +150,80 @@
   white-space: pre-wrap;
 }
 
+/* 마크다운 렌더링 컨테이너 — assistant 카드 전용 */
+.mdBody {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.6;
+  overflow-x: auto;
+  word-break: break-word;
+}
+.mdBody > * { margin: 0; }
+.mdBody > * + * { margin-top: 6px; }
+.mdBody h1,
+.mdBody h2,
+.mdBody h3,
+.mdBody h4 {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  margin-top: 10px;
+  margin-bottom: 2px;
+}
+.mdBody p { margin: 0; }
+.mdBody ul,
+.mdBody ol {
+  padding-left: 18px;
+  margin: 4px 0;
+}
+.mdBody li { margin: 2px 0; }
+.mdBody code {
+  font-family: "Fira Mono", "Consolas", monospace;
+  font-size: 11px;
+  background: #eef1f8;
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+.mdBody pre {
+  background: #1e2030;
+  color: #cdd6f4;
+  border-radius: 7px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-size: 11px;
+  line-height: 1.5;
+  max-width: 100%;
+}
+.mdBody pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+.mdBody table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 11.5px;
+  overflow-x: auto;
+  display: block;
+  max-width: 100%;
+}
+.mdBody th,
+.mdBody td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  text-align: left;
+}
+.mdBody th { background: #eef1f8; font-weight: 600; }
+.mdBody blockquote {
+  border-left: 3px solid var(--c-agent);
+  margin: 4px 0;
+  padding: 2px 10px;
+  color: var(--text-faint);
+  background: #f2f4fc;
+  border-radius: 0 5px 5px 0;
+}
+.mdBody a { color: var(--c-agent); text-decoration: underline; }
+
 /* 스트리밍 커서 */
 .cursor {
   display: inline-block;
@@ -287,6 +361,37 @@
 }
 .gapInput:disabled {
   opacity: 0.6;
+}
+
+/* 퀵액션 칩 행 */
+.chips {
+  display: flex;
+  gap: 5px;
+  padding: 5px 10px 2px;
+  overflow-x: auto;
+  flex: none;
+  scrollbar-width: none;
+}
+.chips::-webkit-scrollbar { display: none; }
+
+.chip {
+  flex: none;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 99px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1.6;
+  transition: background 0.12s, border-color 0.12s;
+}
+.chip:hover {
+  background: #eef1ff;
+  border-color: #b8c0f0;
+  color: var(--c-agent);
 }
 
 /* 입력창 */
