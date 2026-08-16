@@ -335,18 +335,71 @@ export function getCurrentDocumentVersion(
 // (행 쓰기는 engine-builder 코드가 이 헬퍼를 통해 수행)
 // ===========================================================================
 
+/**
+ * 스냅샷에서 JD 라벨을 도출한다.
+ * 순서:
+ *   1. Input 노드 중 name에 "JD"(대소문자 무관)가 포함된 것을 우선 선택.
+ *      없으면 첫 번째 Input 노드를 선택.
+ *   2. 선택된 Input 노드의 config.documentId로 document_versions를 읽어
+ *      현재 본문(current_version)의 첫 비어있지 않은 줄을 반환.
+ *   3. 줄 앞의 '#' 문자와 공백을 제거하고 60자로 truncate.
+ *   4. 문서 없거나 줄을 추출 못 하면 null 반환.
+ *
+ * 러너 무변경 원칙: createRun 내부에서만 호출, 스냅샷 기반 순수 처리.
+ */
+function deriveRunLabel(graphSnapshot: Graph): string | null {
+  const inputNodes = graphSnapshot.nodes.filter((n) => n.type === "input");
+  if (inputNodes.length === 0) return null;
+
+  // JD가 이름에 포함된 노드 우선, 없으면 첫 번째 input 노드
+  const jdNode =
+    inputNodes.find((n) => /jd/i.test(n.name)) ?? inputNodes[0];
+
+  const cfg = jdNode.config as Partial<{ documentId?: string }>;
+  const documentId = cfg.documentId;
+  if (!documentId) return null;
+
+  // 문서의 현재 버전 본문 조회
+  const doc = db.select().from(documents).where(eq(documents.id, documentId)).get();
+  if (!doc) return null;
+
+  const ver = db
+    .select()
+    .from(documentVersions)
+    .where(
+      and(
+        eq(documentVersions.documentId, documentId),
+        eq(documentVersions.version, doc.currentVersion),
+      ),
+    )
+    .get();
+  if (!ver) return null;
+
+  // 첫 비어있지 않은 줄 — '#' 접두어·공백 제거
+  for (const raw of ver.content.split("\n")) {
+    const line = raw.replace(/^#+\s*/, "").trim();
+    if (line.length > 0) {
+      return line.slice(0, 60);
+    }
+  }
+  return null;
+}
+
 export function createRun(
   pipelineId: string,
   graphSnapshot: Graph,
   upstreamRunId?: string | null,
 ): Run {
   const ts = now();
+  // JD 문서 내용 첫 줄로 라벨 자동 도출(없으면 null)
+  const label = deriveRunLabel(graphSnapshot);
   const row = {
     id: nanoid(),
     pipelineId,
     status: "running" as RunStatus,
     graphSnapshot,
     upstreamRunId: upstreamRunId ?? null,
+    label,
     startedAt: ts,
     endedAt: null,
   };
@@ -823,6 +876,7 @@ function toRun(r: Omit<RunDbRow, "graphSnapshot"> & { graphSnapshot?: unknown })
     pipelineId: r.pipelineId,
     status: r.status as RunStatus,
     upstreamRunId: r.upstreamRunId ?? null,
+    label: r.label ?? null,
     startedAt: r.startedAt,
     endedAt: r.endedAt ?? null,
   };

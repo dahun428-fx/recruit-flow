@@ -252,6 +252,12 @@ export interface Run {
   status: RunStatus;
   /** 부분 재실행 시 상류 아티팩트 복사 출처(직전 완료 run) */
   upstreamRunId: string | null;
+  /**
+   * M5 워크스트림 D: JD별 run 그룹핑용 자유 라벨(회사/직군명).
+   * run 시작 시 Input 노드의 JD 문서 내용 첫 줄에서 자동 도출(최대 60자).
+   * "현재 JD" 규약상 문서명은 항상 동일하므로 내용 첫 줄로 구분.
+   */
+  label: string | null;
   startedAt: number;
   endedAt: number | null;
 }

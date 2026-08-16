@@ -35,6 +35,13 @@ JD)으로 엔진·에이전트·SSE·게이트 루프가 **실동작**함도 확
 
 ## M5-0. 선결 정리 (실 DB — **사용자 승인 필수**)
 
+> ✅ **0-1·0-2 실 DB 적용 완료(2026-08-16, 사용자 승인)**: 백업
+> `data/recruit-flow.m5-0-backup.db`, 오염 문서 5개 삭제, 증거 입력→
+> experience-bank.md, JD 입력→"현재 JD"(clean 시드), U+FFFD 0·docs 19.
+> **0-3(고아 tool mounts→채점 노드)·0-4(@live 기준선 run)은 미완** —
+> deriveMounts 검증 run + 구독 쿼터 필요.
+
+
 이후 모든 워크스트림의 전제. 실 DB를 건드리므로 별도 승인 후 실행하고,
 검증은 격리 DB에서 한다(CLAUDE.md).
 

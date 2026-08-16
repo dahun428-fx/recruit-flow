@@ -176,6 +176,9 @@
 .treeIndent3 {
   padding-left: 50px !important;
 }
+.treeIndent4 {
+  padding-left: 66px !important;
+}
 
 /* 빈 항목 */
 .treeEmpty {
@@ -205,6 +208,48 @@
 .runSt_gate_failed { background: var(--c-gate) !important; }
 .runSt_waiting_human { background: var(--c-human) !important; }
 .runSt_cancelled { background: var(--text-faint) !important; }
+
+/* ══ 실행기록 label 그룹 헤더 ══ */
+.runLabelGroup {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 3px 8px 3px 6px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: 4px;
+  user-select: none;
+  box-sizing: border-box;
+}
+.runLabelGroup:hover {
+  background: #f2f4f8;
+}
+
+.runLabelGroupName {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.runLabelGroupCount {
+  flex: none;
+  font-size: 10px;
+  color: var(--text-faint);
+  background: #f2f4f8;
+  border-radius: 10px;
+  padding: 0 5px;
+  margin-left: 2px;
+}
 
 /* ══ 블록 타입 헤더 ══ */
 .typeHead {

@@ -104,6 +104,8 @@ export function FileExplorer({
   const [runFolderOpen, setRunFolderOpen] = useState<Record<string, boolean>>({});
   // lazy-loaded runs per pipeline
   const [pipelineRuns, setPipelineRuns] = useState<Record<string, Run[]>>({});
+  // label 그룹 접힘 상태: `${pipelineId}::${label}` → boolean
+  const [collapsedRunGroups, setCollapsedRunGroups] = useState<Record<string, boolean>>({});
 
   // ── 블록/문서/실행기록 전역 구획 펼침
   const [topOpen, setTopOpen] = useState<Record<TopSection, boolean>>({
@@ -566,6 +568,35 @@ export function FileExplorer({
     return `${mo}/${day} ${h}:${m}`;
   }
 
+  /**
+   * run 목록을 label 별로 그룹핑한다.
+   * - label이 있는 그룹이 앞에 오고, "(라벨 없음)"이 마지막.
+   * - 같은 label 내에서는 인자로 받은 runs가 이미 최신순이므로 순서 유지.
+   * - 그룹 순서는 해당 label의 가장 최신 run 시각 기준 내림차순.
+   */
+  function groupRunsByLabel(runList: Run[]): Array<{ label: string; runs: Run[] }> {
+    const FALLBACK = "(라벨 없음)";
+    const map = new Map<string, Run[]>();
+    for (const r of runList) {
+      const key = r.label?.trim() || FALLBACK;
+      const bucket = map.get(key) ?? [];
+      bucket.push(r);
+      map.set(key, bucket);
+    }
+    // 그룹 정렬: 라벨 있는 그룹 → 없는 그룹, 각 그룹 내에서 첫 run(최신) startedAt 기준 내림차순
+    return Array.from(map.entries())
+      .sort(([aLabel, aRuns], [bLabel, bRuns]) => {
+        const aFallback = aLabel === FALLBACK;
+        const bFallback = bLabel === FALLBACK;
+        if (aFallback !== bFallback) return aFallback ? 1 : -1;
+        // 같은 카테고리 내에선 최신 run 시각 내림차순
+        const aTime = aRuns[0]?.startedAt ?? 0;
+        const bTime = bRuns[0]?.startedAt ?? 0;
+        return bTime - aTime;
+      })
+      .map(([label, groupRuns]) => ({ label, runs: groupRuns }));
+  }
+
   return (
     <div className={styles.explorer}>
       {/* 검색 */}
@@ -658,7 +689,7 @@ export function FileExplorer({
                             <span className={styles.treeName}>실행 기록</span>
                           </button>
 
-                          {/* 실행 목록 */}
+                          {/* 실행 목록 — label 그룹핑 */}
                           {isRunFolderExpanded && (
                             <div>
                               {/* 현재 파이프라인의 라이브 run */}
@@ -677,24 +708,54 @@ export function FileExplorer({
                                   실행 기록 없음
                                 </div>
                               ) : (
-                                runs.map((r) => (
-                                  <button
-                                    key={r.id}
-                                    className={`${styles.treeFile} ${styles.treeIndent3}`}
-                                    onClick={() => {
-                                      if (!isCurrent) {
-                                        router.push(`/pipelines/${p.id}`);
-                                      }
-                                      handleRunClick(r);
-                                    }}
-                                    title={`${formatTime(r.startedAt)} · ${runStatusLabel(r.status)}`}
-                                  >
-                                    <span className={`${styles.treeRunDot} ${styles[`runSt_${r.status}`] ?? ""}`} />
-                                    <span className={styles.treeName}>
-                                      {formatTime(r.startedAt)} · {runStatusLabel(r.status)}
-                                    </span>
-                                  </button>
-                                ))
+                                groupRunsByLabel(runs).map(({ label, runs: groupRuns }) => {
+                                  const groupKey = `${p.id}::${label}`;
+                                  const isGroupCollapsed = !!collapsedRunGroups[groupKey];
+                                  return (
+                                    <div key={label}>
+                                      {/* label 그룹 헤더 */}
+                                      <button
+                                        className={`${styles.runLabelGroup} ${styles.treeIndent3}`}
+                                        title={`JD: ${label} · ${groupRuns.length}개 run`}
+                                        onClick={() =>
+                                          setCollapsedRunGroups((prev) => ({
+                                            ...prev,
+                                            [groupKey]: !prev[groupKey],
+                                          }))
+                                        }
+                                      >
+                                        <span className={styles.treeCaret}>
+                                          {isGroupCollapsed ? "▸" : "▾"}
+                                        </span>
+                                        <span className={styles.runLabelGroupName}>
+                                          {label}
+                                        </span>
+                                        <span className={styles.runLabelGroupCount}>
+                                          {groupRuns.length}
+                                        </span>
+                                      </button>
+                                      {/* label 그룹 내 run 목록 */}
+                                      {!isGroupCollapsed && groupRuns.map((r) => (
+                                        <button
+                                          key={r.id}
+                                          className={`${styles.treeFile} ${styles.treeIndent4}`}
+                                          onClick={() => {
+                                            if (!isCurrent) {
+                                              router.push(`/pipelines/${p.id}`);
+                                            }
+                                            handleRunClick(r);
+                                          }}
+                                          title={`${label} · ${formatTime(r.startedAt)} · ${runStatusLabel(r.status)}`}
+                                        >
+                                          <span className={`${styles.treeRunDot} ${styles[`runSt_${r.status}`] ?? ""}`} />
+                                          <span className={styles.treeName}>
+                                            {formatTime(r.startedAt)} · {runStatusLabel(r.status)}
+                                          </span>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  );
+                                })
                               )}
                             </div>
                           )}

@@ -98,6 +98,9 @@ export const runs = sqliteTable("runs", {
   graphSnapshot: text("graph_snapshot", { mode: "json" }).notNull(),
   // 부분 재실행 시 아티팩트 재사용 출처(직전 완료 run)
   upstreamRunId: text("upstream_run_id"),
+  // M5 워크스트림 D: JD별 run 그룹핑용 자유 라벨(회사/직군명).
+  // run 시작 시 Input 노드의 JD 문서 내용 첫 줄에서 자동 도출.
+  label: text("label"),
   startedAt: integer("started_at").notNull(),
   endedAt: integer("ended_at"),
 });
