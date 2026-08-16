@@ -20,7 +20,7 @@ export async function POST(
     return NextResponse.json({ error: "answer가 필요합니다" }, { status: 400 });
   }
 
-  const result = runner.answer(id, answer);
+  const result = await runner.answer(id, answer);
   if (!result.ok) {
     return NextResponse.json({ error: result.error ?? "답변 처리 실패" }, { status: 409 });
   }

@@ -16,7 +16,7 @@ export async function POST(
 ) {
   const { id: pipelineId } = await params;
 
-  if (!getPipeline(pipelineId)) {
+  if (!(await getPipeline(pipelineId))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
@@ -27,7 +27,7 @@ export async function POST(
   }
 
   // 1. user 메시지 즉시 저장 + pipeline SSE 통지.
-  const userMsg = appendChatMessage(pipelineId, "user", { text });
+  const userMsg = await appendChatMessage(pipelineId, "user", { text });
   eventBus.emitChatMessage(pipelineId, userMsg);
 
   // 2. assistant 메시지용 ID 미리 생성(delta 스트리밍에 사용).
@@ -38,7 +38,7 @@ export async function POST(
 
   void (async () => {
     try {
-      const history = listChatMessages(pipelineId);
+      const history = await listChatMessages(pipelineId);
       // 히스토리에서 방금 저장한 user 메시지는 이미 포함됨 — runChat 내부에서
       // history + userText를 합성하므로 마지막 user 메시지는 history에서 제외한다.
       // (composeChatPrompt는 history에서 user/assistant만 쓰고 userText를 별도 합성)
@@ -54,7 +54,7 @@ export async function POST(
       });
 
       // 4. assistant 텍스트 확정: DB 저장 + pipeline SSE 통지.
-      const assistantMsg = appendChatMessage(pipelineId, "assistant", {
+      const assistantMsg = await appendChatMessage(pipelineId, "assistant", {
         text: result.text,
       }, null, null, assistantMessageId);
       eventBus.emitChatMessage(pipelineId, assistantMsg);
@@ -62,7 +62,7 @@ export async function POST(
       // 챗봇 실패는 로그만(결정 C — 클라이언트는 SSE로 에러 통지 방법이 없음).
       console.error("[chat] runChat 실패:", err);
       // 빈 assistant 메시지로 확정해 채팅 UI에서 실패를 인지할 수 있게 한다.
-      const errMsg = appendChatMessage(pipelineId, "assistant", {
+      const errMsg = await appendChatMessage(pipelineId, "assistant", {
         text: "(챗봇 오류가 발생했습니다. 다시 시도해 주세요.)",
       }, null, null, assistantMessageId);
       eventBus.emitChatMessage(pipelineId, errMsg);

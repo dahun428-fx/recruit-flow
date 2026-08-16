@@ -17,7 +17,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const def = getBlockDef(id);
+  const def = await getBlockDef(id);
   if (!def) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
@@ -29,7 +29,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  if (!getBlockDef(id)) {
+  if (!(await getBlockDef(id))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   const body = (await req.json().catch(() => ({}))) as {
@@ -55,12 +55,12 @@ export async function PATCH(
     if (trimmed === "") {
       return NextResponse.json({ error: "이름은 빈 문자열일 수 없습니다." }, { status: 400 });
     }
-    setBlockDefName(id, trimmed);
+    await setBlockDefName(id, trimmed);
   }
 
   // tray 적용(트레이 승인 = tray:false).
   if (hasTray) {
-    setBlockDefTray(id, body.tray as boolean);
+    await setBlockDefTray(id, body.tray as boolean);
   }
 
   // config 적용 — 정의를 편집하는 유일한 진입점(참조 시맨틱 결정 1).
@@ -68,10 +68,10 @@ export async function PATCH(
     if (typeof body.config !== "object" || Array.isArray(body.config)) {
       return NextResponse.json({ error: "config는 객체여야 합니다." }, { status: 400 });
     }
-    updateBlockDefConfig(id, body.config as NodeConfig);
+    await updateBlockDefConfig(id, body.config as NodeConfig);
   }
 
-  const updated = getBlockDef(id);
+  const updated = await getBlockDef(id);
   // 블록 정의 변경 → 열려 있는 모든 pipeline 채널에 브로드캐스트(engine.md §3).
   if (updated) eventBus.emitBlockDef("updated", id, updated);
   return NextResponse.json(updated);
@@ -82,7 +82,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const ok = deleteBlockDef(id);
+  const ok = await deleteBlockDef(id);
   if (!ok) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }

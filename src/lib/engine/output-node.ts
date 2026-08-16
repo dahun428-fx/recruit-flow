@@ -10,11 +10,11 @@ import type { UpstreamInput } from "./input-composer";
  * Output 노드 1회 실행. 마크다운 상류 아티팩트를 HTML로 렌더해 아티팩트(html) 방출.
  * @throws 마크다운 상류가 정확히 1개가 아니면(검증을 통과했으면 발생하지 않음).
  */
-export function runOutputNode(
+export async function runOutputNode(
   nodeRunId: string,
   inputs: UpstreamInput[],
   title?: string,
-): Artifact {
+): Promise<Artifact> {
   const markdownInputs = inputs.filter((i) => i.artifact.format === "markdown");
   if (markdownInputs.length !== 1) {
     throw new Error(
@@ -25,7 +25,7 @@ export function runOutputNode(
   const md = markdownInputs[0].artifact.content;
   const html = renderResumeHtml(md, title);
 
-  const art = createArtifact(nodeRunId, "html", "");
-  finalizeArtifact(art.id, html, null);
+  const art = await createArtifact(nodeRunId, "html", "");
+  await finalizeArtifact(art.id, html, null);
   return { ...art, content: html };
 }

@@ -1,5 +1,6 @@
 // DB 쿼리 레이어 — CRUD + 엔진 헬퍼.
 // 반환은 API 경계 형태(types.ts, camelCase)로 정규화. 시각은 unixepoch ms.
+// 재플랫폼 Phase 1: postgres.js 드라이버는 async — 모든 쿼리 함수가 Promise 반환.
 
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -45,7 +46,7 @@ const now = () => Date.now();
 
 // ===========================================================================
 // resolveNodeConfig — 참조+오버라이드 시맨틱(M4 결정 1·4-A).
-// runner가 스냅샷 생성 시 호출하는 헬퍼. 순수 함수 — DB 조회 있음.
+// runner가 스냅샷 생성 시 호출하는 헬퍼. DB 조회 있음(async).
 // ===========================================================================
 
 /**
@@ -59,13 +60,13 @@ const now = () => Date.now();
  *
  * 정의 행이 DB에 없으면(삭제 경합 등) node.config를 그대로 반환한다(방어).
  */
-export function resolveNodeConfig(node: NodeRow): NodeConfig {
+export async function resolveNodeConfig(node: NodeRow): Promise<NodeConfig> {
   if (!node.blockDefId) {
     // 맨손 노드 — config가 완결
     return node.config as NodeConfig;
   }
 
-  const def = getBlockDef(node.blockDefId);
+  const def = await getBlockDef(node.blockDefId);
   if (!def) {
     // 정의가 없으면(SET NULL 경합 등) 보유 config 그대로
     return node.config as NodeConfig;
@@ -78,21 +79,26 @@ export function resolveNodeConfig(node: NodeRow): NodeConfig {
   if (node.type === "agent") {
     const agentMerged = merged as AgentConfig;
     if (agentMerged.mounts && agentMerged.mounts.length > 0) {
-      agentMerged.mounts = agentMerged.mounts.map((mountRef: MountRef) => {
-        const mountDef = getBlockDef(mountRef.blockDefId);
-        if (!mountDef) return mountRef; // 정의 없으면 ref 그대로
+      const resolvedMounts: MountRef[] = [];
+      for (const mountRef of agentMerged.mounts) {
+        const mountDef = await getBlockDef(mountRef.blockDefId);
+        if (!mountDef) {
+          resolvedMounts.push(mountRef); // 정의 없으면 ref 그대로
+          continue;
+        }
         // MountRef.override를 정의 config 위에 덮어쓰기
         const resolvedOverride = mountRef.override
           ? { ...mountDef.config, ...mountRef.override }
           : mountDef.config;
         // type·name도 박제 — deriveMounts가 DB 재조회 없이 자족(스냅샷 불변성).
-        return {
+        resolvedMounts.push({
           ...mountRef,
           type: mountDef.type as "skill" | "rule" | "tool",
           name: mountDef.name,
           override: resolvedOverride as MountRef["override"],
-        };
-      });
+        });
+      }
+      agentMerged.mounts = resolvedMounts;
     }
   }
 
@@ -103,21 +109,22 @@ export function resolveNodeConfig(node: NodeRow): NodeConfig {
 // pipelines
 // ===========================================================================
 
-export function listPipelines(): Pipeline[] {
-  return db
+export async function listPipelines(): Promise<Pipeline[]> {
+  const rows = await db
     .select()
     .from(pipelinesTable())
-    .orderBy(desc(pipelinesTable().lastOpenedAt), desc(pipelinesTable().updatedAt))
-    .all()
-    .map(toPipeline);
+    .orderBy(desc(pipelinesTable().lastOpenedAt), desc(pipelinesTable().updatedAt));
+  return rows.map(toPipeline);
 }
 
-export function getPipeline(id: string): Pipeline | null {
-  const row = db.select().from(pipelinesTable()).where(eq(pipelinesTable().id, id)).get();
+export async function getPipeline(id: string): Promise<Pipeline | null> {
+  const row = (
+    await db.select().from(pipelinesTable()).where(eq(pipelinesTable().id, id)).limit(1)
+  )[0];
   return row ? toPipeline(row) : null;
 }
 
-export function createPipeline(name: string): Pipeline {
+export async function createPipeline(name: string): Promise<Pipeline> {
   const ts = now();
   const row = {
     id: nanoid(),
@@ -126,45 +133,46 @@ export function createPipeline(name: string): Pipeline {
     updatedAt: ts,
     lastOpenedAt: ts,
   };
-  db.insert(pipelinesTable()).values(row).run();
+  await db.insert(pipelinesTable()).values(row);
   return toPipeline(row);
 }
 
-export function updatePipeline(
+export async function updatePipeline(
   id: string,
   patch: { name?: string; lastOpenedAt?: number },
-): Pipeline | null {
-  const existing = getPipeline(id);
+): Promise<Pipeline | null> {
+  const existing = await getPipeline(id);
   if (!existing) return null;
   const next = {
     name: patch.name ?? existing.name,
     lastOpenedAt: patch.lastOpenedAt ?? existing.lastOpenedAt ?? undefined,
     updatedAt: now(),
   };
-  db.update(pipelinesTable()).set(next).where(eq(pipelinesTable().id, id)).run();
+  await db.update(pipelinesTable()).set(next).where(eq(pipelinesTable().id, id));
   return getPipeline(id);
 }
 
-export function deletePipeline(id: string): boolean {
-  const res = db.delete(pipelinesTable()).where(eq(pipelinesTable().id, id)).run();
-  return res.changes > 0;
+export async function deletePipeline(id: string): Promise<boolean> {
+  const res = await db
+    .delete(pipelinesTable())
+    .where(eq(pipelinesTable().id, id))
+    .returning({ id: pipelinesTable().id });
+  return res.length > 0;
 }
 
 // ===========================================================================
 // graph (nodes + edges)
 // ===========================================================================
 
-export function getGraph(pipelineId: string): Graph {
-  const nodeRows = db
+export async function getGraph(pipelineId: string): Promise<Graph> {
+  const nodeRows = await db
     .select()
     .from(nodes)
-    .where(eq(nodes.pipelineId, pipelineId))
-    .all();
-  const edgeRows = db
+    .where(eq(nodes.pipelineId, pipelineId));
+  const edgeRows = await db
     .select()
     .from(edges)
-    .where(eq(edges.pipelineId, pipelineId))
-    .all();
+    .where(eq(edges.pipelineId, pipelineId));
   return {
     nodes: nodeRows.map(toNodeRow),
     edges: edgeRows.map(toEdgeRow),
@@ -172,45 +180,41 @@ export function getGraph(pipelineId: string): Graph {
 }
 
 /** nodes+edges를 트랜잭션으로 통째 replace(캔버스 일괄 저장). */
-export function saveGraph(pipelineId: string, graph: Graph): void {
+export async function saveGraph(pipelineId: string, graph: Graph): Promise<void> {
   const ts = now();
-  db.transaction((tx) => {
-    tx.delete(edges).where(eq(edges.pipelineId, pipelineId)).run();
-    tx.delete(nodes).where(eq(nodes.pipelineId, pipelineId)).run();
+  await db.transaction(async (tx) => {
+    await tx.delete(edges).where(eq(edges.pipelineId, pipelineId));
+    await tx.delete(nodes).where(eq(nodes.pipelineId, pipelineId));
 
     for (const n of graph.nodes) {
-      tx.insert(nodes)
-        .values({
-          id: n.id || nanoid(),
-          pipelineId,
-          type: n.type,
-          name: n.name,
-          positionX: n.positionX,
-          positionY: n.positionY,
-          blockDefId: n.blockDefId ?? null,
-          config: n.config,
-          createdAt: ts,
-          updatedAt: ts,
-        })
-        .run();
+      await tx.insert(nodes).values({
+        id: n.id || nanoid(),
+        pipelineId,
+        type: n.type,
+        name: n.name,
+        positionX: n.positionX,
+        positionY: n.positionY,
+        blockDefId: n.blockDefId ?? null,
+        config: n.config,
+        createdAt: ts,
+        updatedAt: ts,
+      });
     }
     for (const e of graph.edges) {
-      tx.insert(edges)
-        .values({
-          id: e.id || nanoid(),
-          pipelineId,
-          sourceNodeId: e.sourceNodeId,
-          targetNodeId: e.targetNodeId,
-          kind: e.kind ?? "flow",
-          sourceHandle: e.sourceHandle ?? null,
-          inputOrder: e.inputOrder ?? 0,
-        })
-        .run();
+      await tx.insert(edges).values({
+        id: e.id || nanoid(),
+        pipelineId,
+        sourceNodeId: e.sourceNodeId,
+        targetNodeId: e.targetNodeId,
+        kind: e.kind ?? "flow",
+        sourceHandle: e.sourceHandle ?? null,
+        inputOrder: e.inputOrder ?? 0,
+      });
     }
-    tx.update(pipelinesTable())
+    await tx
+      .update(pipelinesTable())
       .set({ updatedAt: ts })
-      .where(eq(pipelinesTable().id, pipelineId))
-      .run();
+      .where(eq(pipelinesTable().id, pipelineId));
   });
 }
 
@@ -218,88 +222,84 @@ export function saveGraph(pipelineId: string, graph: Graph): void {
 // documents / document_versions
 // ===========================================================================
 
-export function listDocuments(): Document[] {
-  return db
-    .select()
-    .from(documents)
-    .orderBy(desc(documents.createdAt))
-    .all()
-    .map(toDocument);
+export async function listDocuments(): Promise<Document[]> {
+  const rows = await db.select().from(documents).orderBy(desc(documents.createdAt));
+  return rows.map(toDocument);
 }
 
 /** 문서 + 현재 본문(current_version 행). */
-export function getDocument(id: string): DocumentDetail | null {
-  const doc = db.select().from(documents).where(eq(documents.id, id)).get();
+export async function getDocument(id: string): Promise<DocumentDetail | null> {
+  const doc = (await db.select().from(documents).where(eq(documents.id, id)).limit(1))[0];
   if (!doc) return null;
-  const ver = db
-    .select()
-    .from(documentVersions)
-    .where(
-      and(
-        eq(documentVersions.documentId, id),
-        eq(documentVersions.version, doc.currentVersion),
-      ),
-    )
-    .get();
+  const ver = (
+    await db
+      .select()
+      .from(documentVersions)
+      .where(
+        and(
+          eq(documentVersions.documentId, id),
+          eq(documentVersions.version, doc.currentVersion),
+        ),
+      )
+      .limit(1)
+  )[0];
   return { ...toDocument(doc), content: ver?.content ?? "" };
 }
 
 /** 문서 생성 + v1 초기 버전. author 기본 'human'. */
-export function createDocument(
+export async function createDocument(
   name: string,
   content: string,
   author: "human" | "llm" = "human",
   note?: string,
   folderId?: string | null,
-): DocumentDetail {
+): Promise<DocumentDetail> {
   const ts = now();
   const docId = nanoid();
-  db.transaction((tx) => {
-    tx.insert(documents)
-      .values({ id: docId, name, currentVersion: 1, folderId: folderId ?? null, createdAt: ts })
-      .run();
-    tx.insert(documentVersions)
-      .values({
-        id: nanoid(),
-        documentId: docId,
-        version: 1,
-        content,
-        author,
-        note: note ?? null,
-        createdAt: ts,
-      })
-      .run();
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(documents)
+      .values({ id: docId, name, currentVersion: 1, folderId: folderId ?? null, createdAt: ts });
+    await tx.insert(documentVersions).values({
+      id: nanoid(),
+      documentId: docId,
+      version: 1,
+      content,
+      author,
+      note: note ?? null,
+      createdAt: ts,
+    });
   });
   return { id: docId, name, currentVersion: 1, folderId: folderId ?? null, createdAt: ts, content };
 }
 
 /** 새 버전 추가 → current_version 갱신. author 기본 'human'. */
-export function addDocumentVersion(
+export async function addDocumentVersion(
   documentId: string,
   content: string,
   author: "human" | "llm" = "human",
   note?: string,
-): DocumentDetail | null {
-  const doc = db.select().from(documents).where(eq(documents.id, documentId)).get();
+): Promise<DocumentDetail | null> {
+  const doc = (
+    await db.select().from(documents).where(eq(documents.id, documentId)).limit(1)
+  )[0];
   if (!doc) return null;
   const nextVersion = doc.currentVersion + 1;
   const ts = now();
-  db.transaction((tx) => {
-    tx.insert(documentVersions)
-      .values({
-        id: nanoid(),
-        documentId,
-        version: nextVersion,
-        content,
-        author,
-        note: note ?? null,
-        createdAt: ts,
-      })
-      .run();
-    tx.update(documents)
+  await db.transaction(async (tx) => {
+    await tx.insert(documentVersions).values({
+      id: nanoid(),
+      documentId,
+      version: nextVersion,
+      content,
+      author,
+      note: note ?? null,
+      createdAt: ts,
+    });
+    await tx
+      .update(documents)
       .set({ currentVersion: nextVersion })
-      .where(eq(documents.id, documentId))
-      .run();
+      .where(eq(documents.id, documentId));
   });
   return getDocument(documentId);
 }
@@ -310,37 +310,45 @@ export function addDocumentVersion(
  * 삭제를 막지 않는다 — 해당 노드는 실행 시점에 "문서 없음"으로 실패한다.
  * 존재하지 않는 id면 false 반환.
  */
-export function deleteDocument(id: string): boolean {
-  const res = db.delete(documents).where(eq(documents.id, id)).run();
-  return res.changes > 0;
+export async function deleteDocument(id: string): Promise<boolean> {
+  const res = await db
+    .delete(documents)
+    .where(eq(documents.id, id))
+    .returning({ id: documents.id });
+  return res.length > 0;
 }
 
-export function listDocumentVersions(documentId: string): DocumentVersion[] {
-  return db
+export async function listDocumentVersions(
+  documentId: string,
+): Promise<DocumentVersion[]> {
+  const rows = await db
     .select()
     .from(documentVersions)
     .where(eq(documentVersions.documentId, documentId))
-    .orderBy(desc(documentVersions.version))
-    .all()
-    .map(toDocumentVersion);
+    .orderBy(desc(documentVersions.version));
+  return rows.map(toDocumentVersion);
 }
 
 /** Input 노드가 실행 시점에 읽는 최신 버전(전문 + 버전 번호). */
-export function getCurrentDocumentVersion(
+export async function getCurrentDocumentVersion(
   documentId: string,
-): DocumentVersion | null {
-  const doc = db.select().from(documents).where(eq(documents.id, documentId)).get();
+): Promise<DocumentVersion | null> {
+  const doc = (
+    await db.select().from(documents).where(eq(documents.id, documentId)).limit(1)
+  )[0];
   if (!doc) return null;
-  const ver = db
-    .select()
-    .from(documentVersions)
-    .where(
-      and(
-        eq(documentVersions.documentId, documentId),
-        eq(documentVersions.version, doc.currentVersion),
-      ),
-    )
-    .get();
+  const ver = (
+    await db
+      .select()
+      .from(documentVersions)
+      .where(
+        and(
+          eq(documentVersions.documentId, documentId),
+          eq(documentVersions.version, doc.currentVersion),
+        ),
+      )
+      .limit(1)
+  )[0];
   return ver ? toDocumentVersion(ver) : null;
 }
 
@@ -348,29 +356,28 @@ export function getCurrentDocumentVersion(
 // folders — 문서 임의 폴더 하이라키 (schema.md §folders)
 // ===========================================================================
 
-export function listFolders(): Folder[] {
-  return db
-    .select()
-    .from(folders)
-    .orderBy(asc(folders.createdAt))
-    .all()
-    .map(toFolder);
+export async function listFolders(): Promise<Folder[]> {
+  const rows = await db.select().from(folders).orderBy(asc(folders.createdAt));
+  return rows.map(toFolder);
 }
 
-export function createFolder(name: string, parentId?: string | null): Folder {
+export async function createFolder(
+  name: string,
+  parentId?: string | null,
+): Promise<Folder> {
   const row = {
     id: nanoid(),
     name,
     parentId: parentId ?? null,
     createdAt: now(),
   };
-  db.insert(folders).values(row).run();
+  await db.insert(folders).values(row);
   return toFolder(row);
 }
 
-export function renameFolder(id: string, name: string): Folder | null {
-  db.update(folders).set({ name }).where(eq(folders.id, id)).run();
-  const row = db.select().from(folders).where(eq(folders.id, id)).get();
+export async function renameFolder(id: string, name: string): Promise<Folder | null> {
+  await db.update(folders).set({ name }).where(eq(folders.id, id));
+  const row = (await db.select().from(folders).where(eq(folders.id, id)).limit(1))[0];
   return row ? toFolder(row) : null;
 }
 
@@ -381,25 +388,27 @@ export function renameFolder(id: string, name: string): Folder | null {
  *   - 그 후 폴더 행 삭제
  * 트랜잭션으로 원자 처리. 존재하지 않으면 false.
  */
-export function deleteFolder(id: string): boolean {
-  const target = db.select().from(folders).where(eq(folders.id, id)).get();
+export async function deleteFolder(id: string): Promise<boolean> {
+  const target = (
+    await db.select().from(folders).where(eq(folders.id, id)).limit(1)
+  )[0];
   if (!target) return false;
 
-  db.transaction((tx) => {
+  await db.transaction(async (tx) => {
     // 하위 문서 → 루트(null)로 이동
-    tx.update(documents)
+    await tx
+      .update(documents)
       .set({ folderId: null })
-      .where(eq(documents.folderId, id))
-      .run();
+      .where(eq(documents.folderId, id));
 
     // 하위 폴더 → 조부모(target.parentId)로 승격
-    tx.update(folders)
+    await tx
+      .update(folders)
       .set({ parentId: target.parentId })
-      .where(eq(folders.parentId, id))
-      .run();
+      .where(eq(folders.parentId, id));
 
     // 폴더 행 삭제
-    tx.delete(folders).where(eq(folders.id, id)).run();
+    await tx.delete(folders).where(eq(folders.id, id));
   });
 
   return true;
@@ -410,19 +419,21 @@ export function deleteFolder(id: string): boolean {
  * folderId가 non-null이면 해당 폴더 존재 여부를 검증한다.
  * 존재하지 않는 문서이거나 폴더가 없으면 false.
  */
-export function moveDocument(docId: string, folderId: string | null): boolean {
-  const doc = db.select().from(documents).where(eq(documents.id, docId)).get();
+export async function moveDocument(
+  docId: string,
+  folderId: string | null,
+): Promise<boolean> {
+  const doc = (await db.select().from(documents).where(eq(documents.id, docId)).limit(1))[0];
   if (!doc) return false;
 
   if (folderId !== null) {
-    const folder = db.select().from(folders).where(eq(folders.id, folderId)).get();
+    const folder = (
+      await db.select().from(folders).where(eq(folders.id, folderId)).limit(1)
+    )[0];
     if (!folder) return false;
   }
 
-  db.update(documents)
-    .set({ folderId })
-    .where(eq(documents.id, docId))
-    .run();
+  await db.update(documents).set({ folderId }).where(eq(documents.id, docId));
   return true;
 }
 
@@ -431,8 +442,8 @@ export function moveDocument(docId: string, folderId: string | null): boolean {
  * 순환 금지: parentId가 자기 자신이거나 자신의 후손이면 거부(false 반환).
  * parentId가 non-null이면 대상 폴더 존재 여부도 검증.
  */
-export function moveFolder(id: string, parentId: string | null): boolean {
-  const target = db.select().from(folders).where(eq(folders.id, id)).get();
+export async function moveFolder(id: string, parentId: string | null): Promise<boolean> {
+  const target = (await db.select().from(folders).where(eq(folders.id, id)).limit(1))[0];
   if (!target) return false;
 
   if (parentId !== null) {
@@ -440,7 +451,9 @@ export function moveFolder(id: string, parentId: string | null): boolean {
     if (parentId === id) return false;
 
     // parentId가 실제 존재하는지 확인
-    const newParent = db.select().from(folders).where(eq(folders.id, parentId)).get();
+    const newParent = (
+      await db.select().from(folders).where(eq(folders.id, parentId)).limit(1)
+    )[0];
     if (!newParent) return false;
 
     // 순환 방지: parentId가 자신의 후손인지 조상 체인 순회로 판정
@@ -448,13 +461,15 @@ export function moveFolder(id: string, parentId: string | null): boolean {
     let cursor: string | null = newParent.parentId;
     while (cursor !== null) {
       if (cursor === id) return false; // id가 parentId의 조상 체인에 존재 → 순환
-      const row = db.select().from(folders).where(eq(folders.id, cursor)).get();
+      const row: { parentId: string | null } | undefined = (
+        await db.select().from(folders).where(eq(folders.id, cursor)).limit(1)
+      )[0];
       if (!row) break; // 끊김(방어)
       cursor = row.parentId;
     }
   }
 
-  db.update(folders).set({ parentId }).where(eq(folders.id, id)).run();
+  await db.update(folders).set({ parentId }).where(eq(folders.id, id));
   return true;
 }
 
@@ -475,7 +490,7 @@ export function moveFolder(id: string, parentId: string | null): boolean {
  *
  * 러너 무변경 원칙: createRun 내부에서만 호출, 스냅샷 기반 순수 처리.
  */
-function deriveRunLabel(graphSnapshot: Graph): string | null {
+async function deriveRunLabel(graphSnapshot: Graph): Promise<string | null> {
   const inputNodes = graphSnapshot.nodes.filter((n) => n.type === "input");
   if (inputNodes.length === 0) return null;
 
@@ -488,19 +503,23 @@ function deriveRunLabel(graphSnapshot: Graph): string | null {
   if (!documentId) return null;
 
   // 문서의 현재 버전 본문 조회
-  const doc = db.select().from(documents).where(eq(documents.id, documentId)).get();
+  const doc = (
+    await db.select().from(documents).where(eq(documents.id, documentId)).limit(1)
+  )[0];
   if (!doc) return null;
 
-  const ver = db
-    .select()
-    .from(documentVersions)
-    .where(
-      and(
-        eq(documentVersions.documentId, documentId),
-        eq(documentVersions.version, doc.currentVersion),
-      ),
-    )
-    .get();
+  const ver = (
+    await db
+      .select()
+      .from(documentVersions)
+      .where(
+        and(
+          eq(documentVersions.documentId, documentId),
+          eq(documentVersions.version, doc.currentVersion),
+        ),
+      )
+      .limit(1)
+  )[0];
   if (!ver) return null;
 
   // 첫 비어있지 않은 줄 — '#' 접두어·공백 제거
@@ -513,14 +532,14 @@ function deriveRunLabel(graphSnapshot: Graph): string | null {
   return null;
 }
 
-export function createRun(
+export async function createRun(
   pipelineId: string,
   graphSnapshot: Graph,
   upstreamRunId?: string | null,
-): Run {
+): Promise<Run> {
   const ts = now();
   // JD 문서 내용 첫 줄로 라벨 자동 도출(없으면 null)
-  const label = deriveRunLabel(graphSnapshot);
+  const label = await deriveRunLabel(graphSnapshot);
   const row = {
     id: nanoid(),
     pipelineId,
@@ -531,30 +550,41 @@ export function createRun(
     startedAt: ts,
     endedAt: null,
   };
-  db.insert(runs).values(row).run();
+  await db.insert(runs).values(row);
   return toRun(row);
 }
 
-export function setRunStatus(
+export async function setRunStatus(
   runId: string,
   status: RunStatus,
   ended = status !== "running",
-): void {
-  db.update(runs)
+): Promise<void> {
+  await db
+    .update(runs)
     .set({ status, endedAt: ended ? now() : null })
-    .where(eq(runs.id, runId))
-    .run();
+    .where(eq(runs.id, runId));
 }
 
-export function getRun(runId: string): Run | null {
-  const row = db.select().from(runs).where(eq(runs.id, runId)).get();
+export async function getRun(runId: string): Promise<Run | null> {
+  const row = (await db.select().from(runs).where(eq(runs.id, runId)).limit(1))[0];
   return row ? toRun(row) : null;
 }
 
 /** 시작 시 그래프 스냅샷 전체(엔진이 스케줄링에 사용). */
-export function getRunSnapshot(runId: string): Graph | null {
-  const row = db.select().from(runs).where(eq(runs.id, runId)).get();
+export async function getRunSnapshot(runId: string): Promise<Graph | null> {
+  const row = (await db.select().from(runs).where(eq(runs.id, runId)).limit(1))[0];
   return row ? (row.graphSnapshot as Graph) : null;
+}
+
+/** 파이프라인의 완료된 run 목록(최신순, 최대 20개). */
+export async function listRuns(pipelineId: string, limit = 20): Promise<Run[]> {
+  const rows = await db
+    .select()
+    .from(runs)
+    .where(eq(runs.pipelineId, pipelineId))
+    .orderBy(desc(runs.startedAt))
+    .limit(limit);
+  return rows.map(toRun);
 }
 
 /**
@@ -562,39 +592,29 @@ export function getRunSnapshot(runId: string): Graph | null {
  * M2: running ∪ waiting_human을 활성으로 취급(동시 run 1개, nodes.md §8).
  * 엔진·run 시작 검증이 공유한다.
  */
-/** 파이프라인의 완료된 run 목록(최신순, 최대 20개). */
-export function listRuns(pipelineId: string, limit = 20): Run[] {
-  return db
-    .select()
-    .from(runs)
-    .where(eq(runs.pipelineId, pipelineId))
-    .orderBy(desc(runs.startedAt))
-    .limit(limit)
-    .all()
-    .map(toRun);
-}
-
-export function getActiveRun(pipelineId: string): Run | null {
-  const row = db
-    .select()
-    .from(runs)
-    .where(
-      and(
-        eq(runs.pipelineId, pipelineId),
-        inArray(runs.status, ["running", "waiting_human"]),
-      ),
-    )
-    .orderBy(desc(runs.startedAt))
-    .get();
+export async function getActiveRun(pipelineId: string): Promise<Run | null> {
+  const row = (
+    await db
+      .select()
+      .from(runs)
+      .where(
+        and(
+          eq(runs.pipelineId, pipelineId),
+          inArray(runs.status, ["running", "waiting_human"]),
+        ),
+      )
+      .orderBy(desc(runs.startedAt))
+      .limit(1)
+  )[0];
   return row ? toRun(row) : null;
 }
 
-export function createNodeRun(
+export async function createNodeRun(
   runId: string,
   nodeId: string,
   status: NodeRunStatus = "queued",
   iteration = 1,
-): NodeRun {
+): Promise<NodeRun> {
   const row = {
     id: nanoid(),
     runId,
@@ -607,23 +627,25 @@ export function createNodeRun(
     startedAt: status === "running" ? now() : null,
     endedAt: null as number | null,
   };
-  db.insert(nodeRuns).values(row).run();
+  await db.insert(nodeRuns).values(row);
   return toNodeRun(row);
 }
 
-export function setNodeRunStatus(
+export async function setNodeRunStatus(
   nodeRunId: string,
   status: NodeRunStatus,
   error?: string | null,
-): NodeRun | null {
+): Promise<NodeRun | null> {
   const patch: Record<string, unknown> = { status };
   if (status === "running") patch.startedAt = now();
   if (status === "succeeded" || status === "failed" || status === "skipped") {
     patch.endedAt = now();
   }
   if (error !== undefined) patch.error = error;
-  db.update(nodeRuns).set(patch).where(eq(nodeRuns.id, nodeRunId)).run();
-  const row = db.select().from(nodeRuns).where(eq(nodeRuns.id, nodeRunId)).get();
+  await db.update(nodeRuns).set(patch).where(eq(nodeRuns.id, nodeRunId));
+  const row = (
+    await db.select().from(nodeRuns).where(eq(nodeRuns.id, nodeRunId)).limit(1)
+  )[0];
   return row ? toNodeRun(row) : null;
 }
 
@@ -632,23 +654,23 @@ export function setNodeRunStatus(
  * Gate는 판정 후 항상 succeeded로 마감하므로 status만으로는 pass/fail을
  * 복원할 수 없다 — 재시작·재하이드레이션이 이 값을 읽는다.
  */
-export function setNodeRunGateDecision(
+export async function setNodeRunGateDecision(
   nodeRunId: string,
   decision: "pass" | "fail",
-): void {
-  db.update(nodeRuns)
+): Promise<void> {
+  await db
+    .update(nodeRuns)
     .set({ gateDecision: decision })
-    .where(eq(nodeRuns.id, nodeRunId))
-    .run();
+    .where(eq(nodeRuns.id, nodeRunId));
 }
 
 /** 노드 실행 1회 = 아티팩트 1개. 스트리밍 시작 시 빈 content로 생성. */
-export function createArtifact(
+export async function createArtifact(
   nodeRunId: string,
   format: ArtifactFormat,
   content = "",
   meta?: ArtifactMeta | null,
-): Artifact {
+): Promise<Artifact> {
   const row = {
     id: nanoid(),
     nodeRunId,
@@ -657,65 +679,66 @@ export function createArtifact(
     meta: meta ?? null,
     createdAt: now(),
   };
-  db.insert(artifacts).values(row).run();
+  await db.insert(artifacts).values(row);
   return toArtifact(row);
 }
 
 /** 스트리밍 flush — 누적 content 전체를 갱신(append-flush). */
-export function updateArtifactContent(
+export async function updateArtifactContent(
   artifactId: string,
   content: string,
-): void {
-  db.update(artifacts).set({ content }).where(eq(artifacts.id, artifactId)).run();
+): Promise<void> {
+  await db.update(artifacts).set({ content }).where(eq(artifacts.id, artifactId));
 }
 
 /** 완료 시 확정(내용 + 선택적 meta). */
-export function finalizeArtifact(
+export async function finalizeArtifact(
   artifactId: string,
   content: string,
   meta?: ArtifactMeta | null,
-): void {
+): Promise<void> {
   const patch: Record<string, unknown> = { content };
   if (meta !== undefined) patch.meta = meta;
-  db.update(artifacts).set(patch).where(eq(artifacts.id, artifactId)).run();
+  await db.update(artifacts).set(patch).where(eq(artifacts.id, artifactId));
 }
 
-export function getArtifact(id: string): Artifact | null {
-  const row = db.select().from(artifacts).where(eq(artifacts.id, id)).get();
+export async function getArtifact(id: string): Promise<Artifact | null> {
+  const row = (await db.select().from(artifacts).where(eq(artifacts.id, id)).limit(1))[0];
   return row ? toArtifact(row) : null;
 }
 
 /** 특정 node_run의 아티팩트(1개). */
-export function getArtifactByNodeRun(nodeRunId: string): Artifact | null {
-  const row = db
-    .select()
-    .from(artifacts)
-    .where(eq(artifacts.nodeRunId, nodeRunId))
-    .get();
+export async function getArtifactByNodeRun(nodeRunId: string): Promise<Artifact | null> {
+  const row = (
+    await db.select().from(artifacts).where(eq(artifacts.nodeRunId, nodeRunId)).limit(1)
+  )[0];
   return row ? toArtifact(row) : null;
 }
 
 /** run 복원 조회 — GET /api/runs/[id] (RunState). */
-export function getRunState(runId: string): {
+export async function getRunState(runId: string): Promise<{
   run: Run;
   nodeRuns: NodeRun[];
   artifacts: Artifact[];
-} | null {
-  const run = getRun(runId);
+} | null> {
+  const run = await getRun(runId);
   if (!run) return null;
-  const nrRows = db
+  const nrRows = await db
     .select()
     .from(nodeRuns)
     .where(eq(nodeRuns.runId, runId))
-    .orderBy(asc(nodeRuns.startedAt))
-    .all();
+    .orderBy(asc(nodeRuns.startedAt));
   const nrList = nrRows.map(toNodeRun);
   const artRows = nrList.length
-    ? db
+    ? await db
         .select()
         .from(artifacts)
-        .where(inArray(artifacts.nodeRunId, nrList.map((nr) => nr.id)))
-        .all()
+        .where(
+          inArray(
+            artifacts.nodeRunId,
+            nrList.map((nr) => nr.id),
+          ),
+        )
     : [];
   return {
     run,
@@ -731,17 +754,17 @@ export function getRunState(runId: string): {
  * node_run은 iteration 유지, 새 id 발급. status=succeeded만 복사(회차별
  * 최신 succeeded 1개). 복사한 nodeId 목록을 반환(엔진이 큐잉 판단에 사용).
  */
-export function copyUpstreamArtifacts(
+export async function copyUpstreamArtifacts(
   newRunId: string,
   fromRunId: string,
   nodeIds: string[],
-): string[] {
+): Promise<string[]> {
   if (nodeIds.length === 0) return [];
   const ts = now();
   const copied: string[] = [];
 
-  db.transaction((tx) => {
-    const srcRuns = tx
+  await db.transaction(async (tx) => {
+    const srcRuns = await tx
       .select()
       .from(nodeRuns)
       .where(
@@ -751,8 +774,7 @@ export function copyUpstreamArtifacts(
           inArray(nodeRuns.nodeId, nodeIds),
         ),
       )
-      .orderBy(asc(nodeRuns.iteration))
-      .all();
+      .orderBy(asc(nodeRuns.iteration));
 
     // 같은 nodeId에 여러 succeeded 행(Gate 루프)이 있으면 최신 iteration만.
     const latestByNode = new Map<string, NodeRunDbRow>();
@@ -765,35 +787,30 @@ export function copyUpstreamArtifacts(
 
     for (const src of latestByNode.values()) {
       const newNodeRunId = nanoid();
-      tx.insert(nodeRuns)
-        .values({
-          id: newNodeRunId,
-          runId: newRunId,
-          nodeId: src.nodeId,
-          iteration: src.iteration,
-          status: "succeeded",
-          error: null,
-          startedAt: src.startedAt ?? ts,
-          endedAt: src.endedAt ?? ts,
-        })
-        .run();
+      await tx.insert(nodeRuns).values({
+        id: newNodeRunId,
+        runId: newRunId,
+        nodeId: src.nodeId,
+        iteration: src.iteration,
+        status: "succeeded",
+        error: null,
+        startedAt: src.startedAt ?? ts,
+        endedAt: src.endedAt ?? ts,
+      });
 
-      const srcArts = tx
+      const srcArts = await tx
         .select()
         .from(artifacts)
-        .where(eq(artifacts.nodeRunId, src.id))
-        .all();
+        .where(eq(artifacts.nodeRunId, src.id));
       for (const a of srcArts) {
-        tx.insert(artifacts)
-          .values({
-            id: nanoid(),
-            nodeRunId: newNodeRunId,
-            format: a.format,
-            content: a.content,
-            meta: a.meta ?? null,
-            createdAt: ts,
-          })
-          .run();
+        await tx.insert(artifacts).values({
+          id: nanoid(),
+          nodeRunId: newNodeRunId,
+          format: a.format,
+          content: a.content,
+          meta: a.meta ?? null,
+          createdAt: ts,
+        });
       }
       copied.push(src.nodeId);
     }
@@ -810,7 +827,7 @@ export function copyUpstreamArtifacts(
  * 블록 정의 upsert(name+type 키 — 임포터 idempotent).
  * 기존 행이 있으면 description/config/origin/tray를 갱신하고 enabled·id는 유지.
  */
-export function createBlockDef(input: {
+export async function createBlockDef(input: {
   type: NodeType;
   name: string;
   description?: string;
@@ -821,20 +838,23 @@ export function createBlockDef(input: {
   /** true(기본)면 (type,name) upsert(임포터 idempotency). false면 항상 신규
    *  삽입 — 챗봇 add_block은 기존 승인 블록을 덮어쓰면 안 됨(결정 5 "add만"). */
   upsert?: boolean;
-}): BlockDef {
+}): Promise<BlockDef> {
   const existing =
     input.upsert === false
       ? undefined
-      : db
-          .select()
-          .from(blockDefs)
-          .where(
-            and(eq(blockDefs.type, input.type), eq(blockDefs.name, input.name)),
-          )
-          .get();
+      : (
+          await db
+            .select()
+            .from(blockDefs)
+            .where(
+              and(eq(blockDefs.type, input.type), eq(blockDefs.name, input.name)),
+            )
+            .limit(1)
+        )[0];
 
   if (existing) {
-    db.update(blockDefs)
+    await db
+      .update(blockDefs)
       .set({
         description: input.description ?? null,
         config: input.config,
@@ -842,9 +862,8 @@ export function createBlockDef(input: {
         tray: input.tray ?? existing.tray,
         ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
       })
-      .where(eq(blockDefs.id, existing.id))
-      .run();
-    return getBlockDef(existing.id) as BlockDef;
+      .where(eq(blockDefs.id, existing.id));
+    return (await getBlockDef(existing.id)) as BlockDef;
   }
 
   const row = {
@@ -858,33 +877,36 @@ export function createBlockDef(input: {
     tray: input.tray ?? false,
     createdAt: now(),
   };
-  db.insert(blockDefs).values(row).run();
+  await db.insert(blockDefs).values(row);
   return toBlockDef(row);
 }
 
 /** enabledOnly=true면 팔레트 노출용(enabled 항목)만. tray 상관없이 전부 조회 옵션. */
-export function listBlockDefs(opts?: { enabledOnly?: boolean }): BlockDef[] {
+export async function listBlockDefs(opts?: {
+  enabledOnly?: boolean;
+}): Promise<BlockDef[]> {
   const rows = opts?.enabledOnly
-    ? db.select().from(blockDefs).where(eq(blockDefs.enabled, true)).all()
-    : db.select().from(blockDefs).all();
-  return rows
-    .sort((a, b) => a.createdAt - b.createdAt)
-    .map(toBlockDef);
+    ? await db.select().from(blockDefs).where(eq(blockDefs.enabled, true))
+    : await db.select().from(blockDefs);
+  return rows.sort((a, b) => a.createdAt - b.createdAt).map(toBlockDef);
 }
 
-export function getBlockDef(id: string): BlockDef | null {
-  const row = db.select().from(blockDefs).where(eq(blockDefs.id, id)).get();
+export async function getBlockDef(id: string): Promise<BlockDef | null> {
+  const row = (await db.select().from(blockDefs).where(eq(blockDefs.id, id)).limit(1))[0];
   return row ? toBlockDef(row) : null;
 }
 
-export function setBlockDefEnabled(id: string, enabled: boolean): BlockDef | null {
-  db.update(blockDefs).set({ enabled }).where(eq(blockDefs.id, id)).run();
+export async function setBlockDefEnabled(
+  id: string,
+  enabled: boolean,
+): Promise<BlockDef | null> {
+  await db.update(blockDefs).set({ enabled }).where(eq(blockDefs.id, id));
   return getBlockDef(id);
 }
 
 /** 블록 정의 이름 변경. 팔레트 인라인 편집에서 호출. */
-export function setBlockDefName(id: string, name: string): BlockDef | null {
-  db.update(blockDefs).set({ name }).where(eq(blockDefs.id, id)).run();
+export async function setBlockDefName(id: string, name: string): Promise<BlockDef | null> {
+  await db.update(blockDefs).set({ name }).where(eq(blockDefs.id, id));
   return getBlockDef(id);
 }
 
@@ -893,8 +915,11 @@ export function setBlockDefName(id: string, name: string): BlockDef | null {
  * PATCH /api/block-defs/[id] { config }에서 호출.
  * 반환: 갱신된 BlockDef, 없으면 null.
  */
-export function updateBlockDefConfig(id: string, config: NodeConfig): BlockDef | null {
-  db.update(blockDefs).set({ config }).where(eq(blockDefs.id, id)).run();
+export async function updateBlockDefConfig(
+  id: string,
+  config: NodeConfig,
+): Promise<BlockDef | null> {
+  await db.update(blockDefs).set({ config }).where(eq(blockDefs.id, id));
   return getBlockDef(id);
 }
 
@@ -902,14 +927,17 @@ export function updateBlockDefConfig(id: string, config: NodeConfig): BlockDef |
  * 트레이 승인(tray:false) 또는 트레이 대기(tray:true) 토글.
  * 챗봇이 add_block으로 트레이에 넣은 블록을 캔버스 드래그로 승인할 때 사용.
  */
-export function setBlockDefTray(id: string, tray: boolean): BlockDef | null {
-  db.update(blockDefs).set({ tray }).where(eq(blockDefs.id, id)).run();
+export async function setBlockDefTray(id: string, tray: boolean): Promise<BlockDef | null> {
+  await db.update(blockDefs).set({ tray }).where(eq(blockDefs.id, id));
   return getBlockDef(id);
 }
 
-export function deleteBlockDef(id: string): boolean {
-  const res = db.delete(blockDefs).where(eq(blockDefs.id, id)).run();
-  return res.changes > 0;
+export async function deleteBlockDef(id: string): Promise<boolean> {
+  const res = await db
+    .delete(blockDefs)
+    .where(eq(blockDefs.id, id))
+    .returning({ id: blockDefs.id });
+  return res.length > 0;
 }
 
 // ===========================================================================
@@ -917,14 +945,14 @@ export function deleteBlockDef(id: string): boolean {
 // ===========================================================================
 
 /** 카드/메시지 1건 append. payload는 JSON(카드 데이터 또는 텍스트). */
-export function appendChatMessage(
+export async function appendChatMessage(
   pipelineId: string,
   kind: ChatMessageKind,
   payload: unknown,
   runId?: string | null,
   nodeRunId?: string | null,
   messageId?: string,
-): ChatMessage {
+): Promise<ChatMessage> {
   const row = {
     id: messageId ?? nanoid(),
     pipelineId,
@@ -934,19 +962,18 @@ export function appendChatMessage(
     nodeRunId: nodeRunId ?? null,
     createdAt: now(),
   };
-  db.insert(chatMessages).values(row).run();
+  await db.insert(chatMessages).values(row);
   return toChatMessage(row);
 }
 
 /** 파이프라인 채팅 스레드(시간 오름차순). */
-export function listChatMessages(pipelineId: string): ChatMessage[] {
-  return db
+export async function listChatMessages(pipelineId: string): Promise<ChatMessage[]> {
+  const rows = await db
     .select()
     .from(chatMessages)
     .where(eq(chatMessages.pipelineId, pipelineId))
-    .orderBy(asc(chatMessages.createdAt))
-    .all()
-    .map(toChatMessage);
+    .orderBy(asc(chatMessages.createdAt));
+  return rows.map(toChatMessage);
 }
 
 // ===========================================================================

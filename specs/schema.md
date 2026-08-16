@@ -6,6 +6,18 @@
 
 M4 재설계(2026-08-15): 참조+오버라이드 시맨틱(결정 1), 장착 칩 방식(결정 3), enabled 토글 폐지(결정 5) 반영.
 
+> **재플랫폼 Phase 1 — 방언 전환(2026-08-16, [replatform-plan.md](replatform-plan.md))**:
+> 데이터 레이어를 **SQLite/better-sqlite3(동기) → Postgres/postgres.js(비동기)**로 전환.
+> 테이블·컬럼·관계 계약은 **불변** — 방언만 바뀐다. 매핑: `sqliteTable`→`pgTable`,
+> `text` 유지(id=nanoid), `integer`(ms 시각)→`bigint({mode:"number"})`,
+> `text({mode:"json"})`→`jsonb`, `integer`(boolean)→`boolean`, `real`(좌표)→
+> `doublePrecision`. FK cascade는 pg 네이티브(더 강함) — `folders.parent_id`·
+> `documents.folder_id`는 진짜 FK로 승격하되 **순환 검증은 앱 레벨 유지**.
+> 드라이버가 async이므로 모든 쿼리 함수·러너 경로가 async가 되며, 러너의
+> **"DB 먼저 기록 → SSE 발행" 순서는 반드시 보존**(engine.md §3, 리스크 R1).
+> SQLite 마이그레이션 0000~0004는 아카이브, pg는 백지 0000으로 재시작.
+> 소유권(owner_id)·인증·RLS는 Phase 2 — 이 Phase는 순수 방언 전환이다.
+
 ## 설계 원칙 (Q16, M4 갱신)
 
 1. **현재 그래프 = 정규화 행** (`nodes`/`edges`) — 팔레트·부분

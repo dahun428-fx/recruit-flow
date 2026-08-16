@@ -70,32 +70,32 @@ architect(분해·계획)
 빌더가 현재 마일스톤 밖 기능을 미리 만드는 것 금지(리뷰에서 걸러냄).
 v2 연기 목록(블루프린트)은 제안도 하지 않는다.
 
-## 런타임 — Node 22 (중요)
+## 런타임 — Postgres (재플랫폼 Phase 1, 2026-08-16)
 
-**불변 조건은 하나다: 모든 node/npm/npx는 Node 22로 실행한다.**
-better-sqlite3는 ABI가 맞는 Node에서만 로드되며, Node 23으로 실행하면
-DB 로드 시 **세그폴트**한다. 검증(`npm run build`, dev 서버,
-마이그레이션, e2e)도 예외 없이 Node 22.
+**데이터 레이어가 SQLite/better-sqlite3 → Postgres/postgres.js로 전환됐다**
+([specs/replatform-plan.md](specs/replatform-plan.md), Phase 1). 그 결과:
 
-Node 22를 어떻게 공급할지는 **머신마다 다르다.** 저장소 코드는 특정
-경로를 가정하지 않고 `process.execPath`(현재 프로세스의 Node)를 쓴다 —
-`playwright.config.ts`가 서버 런처를, 런처가 `next dev`를 같은 execPath로
-스폰하므로 어느 머신에서든 자동으로 맞는다.
+- **Node 22 제약 소멸.** better-sqlite3(네이티브 ABI)가 사라져 Node 23+에서도
+  세그폴트하지 않는다. `.node22` 우회, volta `distutils` 함정 등은 앱에 더 이상
+  적용되지 않는다. (단, 아직 pg로 포팅 안 된 **레거시 스모크 스크립트**
+  `scripts/smoke-*.mts`는 이관 대기 — 실행하려면 async 포팅 필요.)
+- **DB 접속은 `DATABASE_URL`.** 기본값은 로컬 개발용
+  `postgres://postgres:postgres@localhost:5433/recruit_flow`. `client.ts`가 이
+  env를 읽는다(과거 `RECRUIT_FLOW_DB_PATH`는 폐지).
+- **스키마 적용은 부트 시 자동.** `instrumentation.register()`가
+  drizzle-kit pg 마이그레이터(`migrate(db,{migrationsFolder:"drizzle"})`)를
+  돌려 백지 DB도 사용 가능하게 만든다. 수동은 `DATABASE_URL=... npm run db:migrate`.
+- **로컬 Postgres는 Docker로.** 예:
+  `docker run -d --name recruit-flow-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_USER=postgres -e POSTGRES_DB=recruit_flow -p 5433:5432 postgres:17`.
+- **e2e는 전용 DB `recruit_flow_e2e`.** `playwright.config.ts`가 `DATABASE_URL`을
+  주입하고 `e2e/support/start-server.mjs`가 매 실행마다 `public`·`drizzle` 스키마를
+  리셋→마이그레이트→시드한다(격리). 실행 전 로컬 pg가 떠 있어야 한다.
+- **SQLite 마이그레이션은 `drizzle/sqlite-archive/`에 보존**, pg는 백지 `0000`부터.
+- **ETL**: 기존 sqlite 데이터를 pg로 옮기는 일회성 스크립트
+  `scripts/etl-sqlite-to-pg.mts`(`sqlite3 -json` CLI로 읽어 적재).
 
-| 머신 | 공급 방식 | 실행 |
-| --- | --- | --- |
-| Windows (원 개발기) | 프로젝트 로컬 `.node22/`(gitignore). nvm-windows가 고장나 우회 설치 | `.node22\npm.cmd run ...` 또는 `$env:PATH` 앞에 `.node22` 추가 |
-| macOS | volta (`node 22.x`가 이미 기본) | `npm run ...` 그대로 |
-
-**macOS 함정 — `npm ci`가 실패한다.** volta가 물려주는 npm이 8.x면
-번들된 node-gyp 9가 Python `distutils`를 요구하는데 Python 3.12+에서
-제거되어 `ModuleNotFoundError: No module named 'distutils'`로 죽는다.
-better-sqlite3는 prebuild가 있어 **소스 빌드가 애초에 불필요**하므로,
-최신 npm으로 설치하면 그냥 통과한다:
-
-```
-npx -y npm@11 ci     # 또는 volta install npm@11 로 영구 고정
-```
+> **Phase 2+ 예정**(replatform-plan.md): 멀티유저(owner_id·Supabase Auth·RLS),
+> 지속 Node 호스트 배포, 사용자별 BYO Anthropic 키.
 
 ## 컨벤션
 

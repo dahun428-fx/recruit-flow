@@ -3,16 +3,17 @@
  * my-recruit 하네스 자산을 recruit-flow DB로 이관하는 1회성 시드 스크립트.
  *
  * 실행:
- *   export PATH="/c/workspaces/recruit-flow/.node22:$PATH"
- *   npx tsx scripts/import-my-recruit.ts [--source <경로>] [--db <경로>]
+ *   DATABASE_URL=postgres://... npx tsx scripts/import-my-recruit.ts [--source <경로>]
  *
  * 환경 변수:
- *   RECRUIT_FLOW_DB_PATH — DB 경로 오버라이드 (--db 보다 낮은 우선순위)
+ *   DATABASE_URL — Postgres 커넥션(미설정 시 로컬 dev pg 폴백)
  *
+ * 재플랫폼 Phase 1: better-sqlite3 → postgres.js. DB 부트스트랩을 pg 마이그레이터로
+ * 교체하고 쿼리 헬퍼가 async가 됐다.
  * 완전 idempotent: 재실행 시 block_defs는 name+type upsert, document는 name 중복 스킵.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
@@ -23,7 +24,6 @@ import { parseArgs } from "node:util";
 const { values: args } = parseArgs({
   options: {
     source: { type: "string", default: "C:\\workspaces2\\my-recruit" },
-    db: { type: "string" },
   },
 });
 
@@ -31,62 +31,37 @@ const SOURCE_DIR = args.source as string;
 const AGENTS_DIR = path.join(SOURCE_DIR, ".claude", "agents");
 const DOCS_DIR = path.join(SOURCE_DIR, "docs", "resume-reference");
 
-// DB 경로: --db > RECRUIT_FLOW_DB_PATH > 기본값
-const DB_PATH =
-  (args.db as string | undefined) ||
-  process.env.RECRUIT_FLOW_DB_PATH ||
-  path.join(process.cwd(), "data", "recruit-flow.db");
-
-// DB 경로를 환경변수로 주입해 client.ts가 같은 경로를 사용하게 함
-process.env.RECRUIT_FLOW_DB_PATH = DB_PATH;
-
 console.log(`[importer] source  : ${SOURCE_DIR}`);
-console.log(`[importer] db      : ${DB_PATH}`);
-
-// DB 디렉터리 생성
-const DB_DIR = path.dirname(DB_PATH);
-if (!existsSync(DB_DIR)) {
-  mkdirSync(DB_DIR, { recursive: true });
-}
+console.log(
+  `[importer] db      : ${process.env.DATABASE_URL ?? "(로컬 dev pg 폴백)"}`,
+);
 
 // ---------------------------------------------------------------------------
-// DB 클라이언트 & 쿼리 헬퍼 임포트 (동적 — DB_PATH 환경변수 주입 후)
+// DB 클라이언트 & 쿼리 헬퍼 임포트
 // ---------------------------------------------------------------------------
 
 // NOTE: Next.js App Router 전용 경로가 아닌 순수 TS 모듈이므로 직접 임포트.
 // tsx가 TypeScript를 그대로 실행하므로 .ts 확장자 유지.
 
-import Database from "better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import * as schema from "../src/lib/db/schema";
-
 // ---------------------------------------------------------------------------
-// 마이그레이션 자동 적용 (격리 DB 지원 — migrations 폴더 기준)
+// 마이그레이션 자동 적용 (pg 마이그레이터 — migrations 폴더 기준)
 // ---------------------------------------------------------------------------
 
 const MIGRATIONS_FOLDER = path.join(process.cwd(), "drizzle");
 
-function ensureSchema(): void {
-  const sqlite = new Database(DB_PATH);
-  sqlite.pragma("journal_mode = WAL");
-  sqlite.pragma("foreign_keys = ON");
-  const tempDb = drizzle(sqlite, { schema });
+async function ensureSchema(): Promise<void> {
+  const { migrate } = await import("drizzle-orm/postgres-js/migrator");
+  const { db } = await import("../src/lib/db/client");
   try {
-    migrate(tempDb, { migrationsFolder: MIGRATIONS_FOLDER });
+    await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
     console.log("[importer] 스키마 확인/적용 완료");
   } catch (err) {
     // 이미 적용된 경우 migrate는 no-op이므로 오류면 진짜 오류
     console.error("[importer] 마이그레이션 실패:", err);
     process.exit(1);
-  } finally {
-    sqlite.close();
   }
 }
 
-// queries는 client.ts를 평가하면서 DB 커넥션을 즉시 연다. 반드시 위에서
-// RECRUIT_FLOW_DB_PATH를 설정하고 스키마를 적용한 뒤 동적으로 불러와야
-// --db 오버라이드가 실제 쿼리 커넥션에도 반영된다.
 type Queries = typeof import("../src/lib/db/queries");
 let createBlockDef: Queries["createBlockDef"];
 let createDocument: Queries["createDocument"];
@@ -188,7 +163,7 @@ function parseFrontmatter(src: string): { fm: Frontmatter; body: string } {
 let blockDefsCreated = 0;
 let blockDefsUpdated = 0;
 
-function importAgents(): void {
+async function importAgents(): Promise<void> {
   if (!existsSync(AGENTS_DIR)) {
     console.warn(`[importer] 에이전트 디렉터리 없음: ${AGENTS_DIR}`);
     return;
@@ -222,11 +197,11 @@ function importAgents(): void {
       ...(outputFormat === "json" ? { jsonSchema: SCORING_JSON_SCHEMA } : {}),
     };
 
-    const existing = listBlockDefs().find(
+    const existing = (await listBlockDefs()).find(
       (b) => b.name === agentName && b.type === "agent",
     );
 
-    createBlockDef({
+    await createBlockDef({
       type: "agent",
       name: agentName,
       description,
@@ -272,14 +247,14 @@ function resolveModel(raw: string): string {
 let docsCreated = 0;
 let docsSkipped = 0;
 
-function importDocuments(): void {
+async function importDocuments(): Promise<void> {
   if (!existsSync(DOCS_DIR)) {
     console.warn(`[importer] 문서 디렉터리 없음: ${DOCS_DIR}`);
     return;
   }
 
   // 기존 문서 이름 목록 (중복 스킵용)
-  const existingNames = new Set(listDocuments().map((d) => d.name));
+  const existingNames = new Set((await listDocuments()).map((d) => d.name));
 
   const files = readdirSync(DOCS_DIR).filter((f) => f.endsWith(".md"));
 
@@ -294,7 +269,7 @@ function importDocuments(): void {
       continue;
     }
 
-    createDocument(docName, content, "human");
+    await createDocument(docName, content, "human");
     docsCreated++;
     console.log(`  [생성] document "${docName}"`);
   }
@@ -305,21 +280,25 @@ function importDocuments(): void {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  ensureSchema();
+  await ensureSchema();
   ({ createBlockDef, createDocument, listBlockDefs, listDocuments } =
     await import("../src/lib/db/queries"));
 
   console.log("\n=== 에이전트 임포트 ===");
-  importAgents();
+  await importAgents();
 
   console.log("\n=== 문서 임포트 ===");
-  importDocuments();
+  await importDocuments();
 
   console.log("\n=== 완료 ===");
   console.log(
     `block_defs: 생성 ${blockDefsCreated}개 / 갱신 ${blockDefsUpdated}개`,
   );
   console.log(`documents : 생성 ${docsCreated}개 / 스킵 ${docsSkipped}개`);
+
+  // postgres.js 풀을 닫아 프로세스가 매달리지 않게 한다.
+  const { sql } = await import("../src/lib/db/client");
+  await sql.end();
 }
 
 void main().catch((error: unknown) => {

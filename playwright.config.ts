@@ -1,10 +1,8 @@
-import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 
-// ★ Node 22 강제: better-sqlite3는 ABI가 맞는 Node에서만 로드된다(Node 23 = 세그폴트).
-//   이 config를 실행 중인 Node가 곧 프로젝트가 정한 Node이므로, 그 execPath로 서버
-//   런처를 실행하고 런처가 다시 같은 execPath로 next dev를 스폰한다.
-//   Windows(`.node22\npm.cmd run e2e`)·macOS(volta) 모두 자동으로 맞는다.
+// pg 전환 후 Node 22 제약 소멸(better-sqlite3 제거). 어느 Node로 실행해도 된다.
+//   이 config를 실행 중인 Node의 execPath로 서버 런처를 실행하고, 런처가 다시 같은
+//   execPath로 next dev를 스폰한다(일관성 유지).
 const NODE = process.execPath;
 const PORT = process.env.E2E_PORT ?? "3200"; // 3000은 타앱 서비스워커 오염 회피
 
@@ -40,12 +38,10 @@ export default defineConfig({
     stderr: "pipe",
     env: {
       RECRUIT_FLOW_E2E_STUB: "1",
-      RECRUIT_FLOW_DB_PATH: path.join(
-        process.cwd(),
-        "tmp",
-        "e2e",
-        "recruit-flow-e2e.db",
-      ),
+      // 격리 = 전용 e2e 데이터베이스. 런처가 매 실행마다 스키마를 리셋·시드한다.
+      DATABASE_URL:
+        process.env.E2E_DATABASE_URL ??
+        "postgres://postgres:postgres@localhost:5433/recruit_flow_e2e",
       E2E_PORT: PORT,
     },
   },

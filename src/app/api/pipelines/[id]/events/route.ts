@@ -15,7 +15,7 @@ export async function GET(
 ) {
   const { id: pipelineId } = await params;
 
-  if (!getPipeline(pipelineId)) {
+  if (!(await getPipeline(pipelineId))) {
     return new Response("not found", { status: 404 });
   }
 

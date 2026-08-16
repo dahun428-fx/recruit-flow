@@ -8,8 +8,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  if (!getDocument(id)) {
+  if (!(await getDocument(id))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
-  return NextResponse.json(listDocumentVersions(id));
+  return NextResponse.json(await listDocumentVersions(id));
 }

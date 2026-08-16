@@ -10,10 +10,10 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  if (!getPipeline(id)) {
+  if (!(await getPipeline(id))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
-  return NextResponse.json(getGraph(id));
+  return NextResponse.json(await getGraph(id));
 }
 
 export async function PUT(
@@ -21,7 +21,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  if (!getPipeline(id)) {
+  if (!(await getPipeline(id))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   const body = (await req.json().catch(() => null)) as {
@@ -42,6 +42,6 @@ export async function PUT(
       { status: 400 },
     );
   }
-  saveGraph(id, { nodes: body.nodes, edges: body.edges });
+  await saveGraph(id, { nodes: body.nodes, edges: body.edges });
   return NextResponse.json({ ok: true });
 }

@@ -10,7 +10,7 @@ import { eventBus } from "@/lib/engine/events";
 import type { NodeConfig, NodeType } from "@/lib/types";
 
 export async function GET() {
-  return NextResponse.json(listBlockDefs());
+  return NextResponse.json(await listBlockDefs());
 }
 
 export async function POST(req: Request) {
@@ -31,7 +31,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const created = createBlockDef({
+  const created = await createBlockDef({
     type: body.type,
     name: body.name,
     description: body.description,

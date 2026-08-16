@@ -19,7 +19,7 @@ export async function POST(
     // 본문 없음 = 승인만(입력 그대로 통과).
   }
 
-  const result = runner.approve(id, editedContent);
+  const result = await runner.approve(id, editedContent);
   if (!result.ok) {
     return NextResponse.json({ error: result.error ?? "승인 실패" }, { status: 409 });
   }

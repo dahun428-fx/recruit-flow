@@ -9,7 +9,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const pipeline = getPipeline(id);
+  const pipeline = await getPipeline(id);
   if (!pipeline) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
@@ -25,7 +25,7 @@ export async function PATCH(
     name?: string;
     lastOpenedAt?: number;
   };
-  const updated = updatePipeline(id, body);
+  const updated = await updatePipeline(id, body);
   if (!updated) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
@@ -37,7 +37,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const ok = deletePipeline(id);
+  const ok = await deletePipeline(id);
   if (!ok) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }

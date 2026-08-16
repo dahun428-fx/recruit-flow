@@ -99,8 +99,8 @@ class Runner {
   // run 시작
   // =========================================================================
 
-  start(pipelineId: string): RunStartResult {
-    const graph = getGraph(pipelineId);
+  async start(pipelineId: string): Promise<RunStartResult> {
+    const graph = await getGraph(pipelineId);
 
     // engine.md §1: 스냅샷 생성 시 참조를 resolve — 각 노드 config를 완결화하고
     // Agent의 config.mounts도 정의를 박제한다. 이 완결 스냅샷을 runs.graph_snapshot에
@@ -110,11 +110,11 @@ class Runner {
     // block_def)라 outputFormat이 raw에는 없다. resolve 전 그래프로 검증하면
     // 참조 Agent의 outputFormat을 못 읽어 gate_json_upstream/output_markdown_count를
     // 오검증한다(R1 회귀). resolveGraph는 한 번만 호출.
-    const snapshot = resolveGraph(graph);
+    const snapshot = await resolveGraph(graph);
     const errors: ValidationError[] = validateGraph(snapshot.nodes, snapshot.edges);
     if (errors.length > 0) return { errors };
 
-    const run = createRun(pipelineId, snapshot, null);
+    const run = await createRun(pipelineId, snapshot, null);
     const control = this.buildControl(run.id, pipelineId, snapshot);
 
     // 루트 노드(상류 없는 flow 노드)만 초기 큐잉 — node_run 생성.
@@ -124,12 +124,12 @@ class Runner {
     for (const nodeId of rootNodeIds(control.index)) {
       const n = control.index.nodeById.get(nodeId);
       if (n?.type === "skill" || n?.type === "rule" || n?.type === "tool") continue;
-      this.ensureNodeRun(control, nodeId, 1, "queued");
+      await this.ensureNodeRun(control, nodeId, 1, "queued");
     }
 
     this.controls.set(run.id, control);
-    this.emitRunStatus(control, "running");
-    this.emitChatCard(control, "card_run", {
+    await this.emitRunStatus(control, "running");
+    await this.emitChatCard(control, "card_run", {
       event: "started",
       title: "실행 시작",
     });
@@ -142,13 +142,17 @@ class Runner {
    * 부분 재실행(A4) — from_node 상류 전이 폐포를 직전 완료 run에서 복사,
    * from_node부터 하류만 큐잉(§8-B). 현재 그래프로 스냅샷.
    */
-  startFrom(pipelineId: string, fromNodeId: string, upstreamRunId: string): RunStartResult {
-    const liveGraph = getGraph(pipelineId);
+  async startFrom(
+    pipelineId: string,
+    fromNodeId: string,
+    upstreamRunId: string,
+  ): Promise<RunStartResult> {
+    const liveGraph = await getGraph(pipelineId);
 
     // 부분 재실행도 현재 그래프를 resolve해 완결 스냅샷으로 고정(engine.md §1).
     // 검증은 resolve 뒤에 — 참조 노드 outputFormat이 block_def에 있어 raw로는
     // 오검증되기 때문(start와 동일한 R1 회귀 방지).
-    const graph = resolveGraph(liveGraph);
+    const graph = await resolveGraph(liveGraph);
     const errors: ValidationError[] = validateGraph(graph.nodes, graph.edges);
     if (errors.length > 0) return { errors };
     const index = indexGraph(graph.nodes, graph.edges);
@@ -160,29 +164,29 @@ class Runner {
       };
     }
 
-    const run = createRun(pipelineId, graph, upstreamRunId);
+    const run = await createRun(pipelineId, graph, upstreamRunId);
 
     // from_node의 상류 전이 폐포(엄격 상류 — from_node 제외) 복사 대상.
     const closure = upstreamClosure(index, fromNodeId);
     // 현재 그래프에 존재하는 노드만 복사(id 불일치 상류는 재실행).
     const copyTargets = [...closure].filter((id) => index.nodeById.has(id));
-    const copied = copyUpstreamArtifacts(run.id, upstreamRunId, copyTargets);
+    const copied = await copyUpstreamArtifacts(run.id, upstreamRunId, copyTargets);
 
     const control = this.buildControl(run.id, pipelineId, graph);
     // 복사된 노드는 succeeded로 표시(재실행 안 함) + nodeRun id 매핑 확보.
     const copiedSet = new Set(copied);
-    this.hydrateCopiedNodeRuns(control, copiedSet);
+    await this.hydrateCopiedNodeRuns(control, copiedSet);
 
     // from_node를 큐잉(복사 폐포는 succeeded 취급되어 join 충족).
-    this.ensureNodeRun(control, fromNodeId, 1, "queued");
+    await this.ensureNodeRun(control, fromNodeId, 1, "queued");
     // from_node의 상류 중 복사 못 한 게 있으면(id 불일치) 그 상류부터 재큐잉.
     for (const upId of index.upstream.get(fromNodeId) ?? []) {
-      if (!copiedSet.has(upId)) this.ensureNodeRun(control, upId, 1, "queued");
+      if (!copiedSet.has(upId)) await this.ensureNodeRun(control, upId, 1, "queued");
     }
 
     this.controls.set(run.id, control);
-    this.emitRunStatus(control, "running");
-    this.emitChatCard(control, "card_run", {
+    await this.emitRunStatus(control, "running");
+    await this.emitChatCard(control, "card_run", {
       event: "started",
       title: "부분 재실행 시작",
       fromNodeId,
@@ -213,13 +217,15 @@ class Runner {
   }
 
   /** 복사된 상류 노드(succeeded)의 최신 node_run id를 control에 반영. */
-  private hydrateCopiedNodeRuns(control: RunControl, copied: Set<string>): void {
+  private async hydrateCopiedNodeRuns(
+    control: RunControl,
+    copied: Set<string>,
+  ): Promise<void> {
     if (copied.size === 0) return;
-    const rows = db
+    const rows = await db
       .select()
       .from(nodeRunsTable)
-      .where(and(eq(nodeRunsTable.runId, control.runId), eq(nodeRunsTable.status, "succeeded")))
-      .all();
+      .where(and(eq(nodeRunsTable.runId, control.runId), eq(nodeRunsTable.status, "succeeded")));
     for (const r of rows) {
       if (!copied.has(r.nodeId)) continue;
       const iter = r.iteration;
@@ -234,12 +240,12 @@ class Runner {
   // 중단
   // =========================================================================
 
-  cancel(runId: string): { ok: boolean } {
+  async cancel(runId: string): Promise<{ ok: boolean }> {
     const control = this.controls.get(runId);
     if (!control) {
-      const run = getRun(runId);
+      const run = await getRun(runId);
       if (run && (run.status === "running" || run.status === "waiting_human")) {
-        this.forceFinalizeOrphan(runId, "cancelled");
+        await this.forceFinalizeOrphan(runId, "cancelled");
         return { ok: true };
       }
       return { ok: false };
@@ -266,7 +272,7 @@ class Runner {
     void this.drive(control).catch((e) => {
       // eslint-disable-next-line no-console
       console.error(`[runner] drive crashed for run ${control.runId}:`, e);
-      this.finalizeRun(control, "failed");
+      void this.finalizeRun(control, "failed").catch(() => {});
     });
   }
 
@@ -287,7 +293,7 @@ class Runner {
       if (!control.paused) {
         let launched = true;
         while (launched && inFlight.size < MAX_CONCURRENCY && !control.cancelled) {
-          launched = this.launchNextReady(control, inFlight);
+          launched = await this.launchNextReady(control, inFlight);
         }
       }
 
@@ -309,11 +315,11 @@ class Runner {
 
     // 마감.
     if (control.gateFailedReason) {
-      this.finishGateFailed(control);
+      await this.finishGateFailed(control);
       return;
     }
     if (control.cancelled) {
-      this.finishCancelled(control);
+      await this.finishCancelled(control);
       return;
     }
     if (control.paused) {
@@ -321,11 +327,14 @@ class Runner {
       return;
     }
     const anyFailure = control.failedOrSkipped.size > 0;
-    this.finalizeRun(control, anyFailure ? "failed" : "succeeded");
+    await this.finalizeRun(control, anyFailure ? "failed" : "succeeded");
   }
 
   /** 준비된 다음 노드 1개를 실행에 투입(inFlight에 추가). 없으면 false. */
-  private launchNextReady(control: RunControl, inFlight: Set<Promise<void>>): boolean {
+  private async launchNextReady(
+    control: RunControl,
+    inFlight: Set<Promise<void>>,
+  ): Promise<boolean> {
     const nodeId = this.pickReady(control);
     if (!nodeId) return false;
 
@@ -334,12 +343,12 @@ class Runner {
     control.handled.add(key);
 
     const node = control.index.nodeById.get(nodeId)!;
-    const nodeRunId = this.ensureNodeRun(control, nodeId, iter, "queued");
+    const nodeRunId = await this.ensureNodeRun(control, nodeId, iter, "queued");
 
     // 상류가 죽었으면 스킵.
     const deadUpstream = this.upstreamFailed(control, nodeId, iter);
     if (deadUpstream) {
-      this.markNode(control, nodeId, nodeRunId, iter, "skipped");
+      await this.markNode(control, nodeId, nodeRunId, iter, "skipped");
       control.failedOrSkipped.add(key);
       control.wake?.();
       return true;
@@ -467,20 +476,20 @@ class Runner {
     nodeRunId: string,
     iter: number,
   ): Promise<void> {
-    this.markNode(control, node.id, nodeRunId, iter, "running");
+    await this.markNode(control, node.id, nodeRunId, iter, "running");
     const key = keyOf(node.id, iter);
 
     try {
       if (node.type === "input") {
-        runInputNode(nodeRunId, node.config as InputConfig);
-        this.settleSucceeded(control, node, nodeRunId, iter);
+        await runInputNode(nodeRunId, node.config as InputConfig);
+        await this.settleSucceeded(control, node, nodeRunId, iter);
       } else if (node.type === "output") {
-        const inputs = this.collectInputs(control, node.id, iter);
+        const inputs = await this.collectInputs(control, node.id, iter);
         const title = deriveTitle(node.config as OutputConfig, node.name);
-        runOutputNode(nodeRunId, inputs, title);
-        this.settleSucceeded(control, node, nodeRunId, iter);
+        await runOutputNode(nodeRunId, inputs, title);
+        await this.settleSucceeded(control, node, nodeRunId, iter);
       } else if (node.type === "agent") {
-        const inputs = this.collectInputs(control, node.id, iter);
+        const inputs = await this.collectInputs(control, node.id, iter);
         await runAgentNode({
           runId: control.runId,
           nodeRunId,
@@ -491,7 +500,7 @@ class Runner {
           askHuman: (question) => this.onAskHuman(control, node, nodeRunId, iter, question),
         });
         if (control.invalidated.has(key)) return; // 취소로 무효화됨
-        this.settleSucceeded(control, node, nodeRunId, iter);
+        await this.settleSucceeded(control, node, nodeRunId, iter);
       } else if (node.type === "gate") {
         await this.runGate(control, node, nodeRunId, iter);
       } else if (node.type === "human") {
@@ -504,20 +513,20 @@ class Runner {
       const msg = control.cancelled
         ? "실행 중 취소됨"
         : (e as Error).message || String(e);
-      this.markNode(control, node.id, nodeRunId, iter, "failed", msg);
+      await this.markNode(control, node.id, nodeRunId, iter, "failed", msg);
       control.failedOrSkipped.add(key);
     }
   }
 
-  private settleSucceeded(
+  private async settleSucceeded(
     control: RunControl,
     node: NodeRow,
     nodeRunId: string,
     iter: number,
-  ): void {
-    this.markNode(control, node.id, nodeRunId, iter, "succeeded");
+  ): Promise<void> {
+    await this.markNode(control, node.id, nodeRunId, iter, "succeeded");
     control.succeeded.add(keyOf(node.id, iter));
-    this.emitRunStatus(control, "running");
+    await this.emitRunStatus(control, "running");
   }
 
   // =========================================================================
@@ -531,7 +540,7 @@ class Runner {
     iter: number,
   ): Promise<void> {
     const config = node.config as GateConfig;
-    const inputs = this.collectInputs(control, node.id, iter);
+    const inputs = await this.collectInputs(control, node.id, iter);
     const jsonInputs = inputs
       .filter((i) => i.artifact.format === "json")
       .map((i) => ({ nodeName: i.nodeName, artifact: i.artifact }));
@@ -545,7 +554,7 @@ class Runner {
         e instanceof GateExprError
           ? `Gate 조건식 오류: ${e.message}`
           : (e as Error).message;
-      this.markNode(control, node.id, nodeRunId, iter, "failed", msg);
+      await this.markNode(control, node.id, nodeRunId, iter, "failed", msg);
       control.failedOrSkipped.add(keyOf(node.id, iter));
       return;
     }
@@ -553,19 +562,19 @@ class Runner {
     // Gate는 아티팩트를 만들지 않는다(순수 라우터). node_run만 succeeded.
     // 라우팅 결정을 기록 — pickReady가 pass/fail 하류를 이 결정과 대조한다.
     if (pass) {
-      this.recordGateDecision(control, node.id, nodeRunId, iter, "pass");
-      this.markNode(control, node.id, nodeRunId, iter, "succeeded");
+      await this.recordGateDecision(control, node.id, nodeRunId, iter, "pass");
+      await this.markNode(control, node.id, nodeRunId, iter, "succeeded");
       control.succeeded.add(keyOf(node.id, iter));
-      this.emitRunStatus(control, "running");
+      await this.emitRunStatus(control, "running");
       return;
     }
-    this.recordGateDecision(control, node.id, nodeRunId, iter, "fail");
+    await this.recordGateDecision(control, node.id, nodeRunId, iter, "fail");
 
     // fail: maxLoops 판정. 이 Gate가 이미 몇 번 fail 했는가 = gate 노드 회차.
     const loopCount = iter; // Gate 노드의 회차 = 실행 횟수.
     const maxLoops = config.maxLoops ?? 3;
     // Gate 자체는 succeeded로 마감(판정 완료). fail은 라우팅으로 표현.
-    this.markNode(control, node.id, nodeRunId, iter, "succeeded");
+    await this.markNode(control, node.id, nodeRunId, iter, "succeeded");
     control.succeeded.add(keyOf(node.id, iter));
 
     if (loopCount >= maxLoops) {
@@ -582,15 +591,15 @@ class Runner {
     // fail 대상: failTargetNodeId 또는 상류 마크다운 생성 노드.
     const failTarget = this.resolveFailTarget(control, node, config);
     if (!failTarget) {
-      this.markNode(control, node.id, nodeRunId, iter, "failed", "Gate fail 대상 노드를 찾을 수 없습니다");
+      await this.markNode(control, node.id, nodeRunId, iter, "failed", "Gate fail 대상 노드를 찾을 수 없습니다");
       control.failedOrSkipped.delete(keyOf(node.id, iter));
       control.failedOrSkipped.add(keyOf(node.id, iter));
       return;
     }
 
     // failTarget부터 (이 Gate 포함) 하류를 iteration+1로 재큐잉.
-    this.requeueForFail(control, node, failTarget, jsonInputs);
-    this.emitRunStatus(control, "running");
+    await this.requeueForFail(control, node, failTarget, jsonInputs);
+    await this.emitRunStatus(control, "running");
     control.wake?.();
   }
 
@@ -619,12 +628,12 @@ class Runner {
    * fail 재큐잉 — failTarget부터 Gate까지의 경로 노드를 iteration+1로 재실행.
    * failTarget에는 직전 회차 채점 JSON을 자동 포함(iterationFeedbackByNode).
    */
-  private requeueForFail(
+  private async requeueForFail(
     control: RunControl,
     gate: NodeRow,
     failTargetId: string,
     priorScores: { nodeName: string; artifact: Artifact }[],
-  ): void {
+  ): Promise<void> {
     // failTarget → 트리거 Gate 경로만 재실행 대상. Gate는 포함하되 그 pass/fail
     // 하류(Output 등)로는 전개하지 않는다 — 그렇지 않으면 pass-하류가 유령
     // iteration+1 node_run으로 재큐잉됨.
@@ -642,7 +651,7 @@ class Runner {
       const next = cur + 1;
       // 이전 회차 키 상태는 남기고, 새 회차 키로 재큐잉.
       control.iterationByNode.set(nodeId, next);
-      this.ensureNodeRun(control, nodeId, next, "queued");
+      await this.ensureNodeRun(control, nodeId, next, "queued");
     }
   }
 
@@ -660,15 +669,16 @@ class Runner {
     iter: number,
   ): Promise<void> {
     const config = node.config as HumanConfig;
-    const inputs = this.collectInputs(control, node.id, iter);
+    const inputs = await this.collectInputs(control, node.id, iter);
 
     // node_run·run을 waiting_human으로. run 스케줄링 정지(다른 진행 노드는 마저).
-    setNodeRunStatus(nodeRunId, "waiting_human", null);
+    // R1: DB 상태 쓰기를 await한 뒤에 SSE 통지.
+    await setNodeRunStatus(nodeRunId, "waiting_human", null);
     this.emitNodeStatus(control, node.id, nodeRunId, iter, "waiting_human");
-    setRunStatus(control.runId, "waiting_human", false);
-    this.emitRunStatus(control, "waiting_human");
+    await setRunStatus(control.runId, "waiting_human", false);
+    await this.emitRunStatus(control, "waiting_human");
     control.paused = true;
-    this.emitChatCard(
+    await this.emitChatCard(
       control,
       "card_human",
       {
@@ -687,7 +697,7 @@ class Runner {
       approval = await humanWait.waitForApproval(nodeRunId);
     } catch (e) {
       // 취소 등으로 reject → 노드 실패.
-      this.markNode(control, node.id, nodeRunId, iter, "failed", (e as Error).message);
+      await this.markNode(control, node.id, nodeRunId, iter, "failed", (e as Error).message);
       control.failedOrSkipped.add(keyOf(node.id, iter));
       control.paused = false;
       return;
@@ -697,15 +707,15 @@ class Runner {
     const primary = this.pickPrimaryInput(inputs, config);
     const content = approval.editedContent ?? primary?.artifact.content ?? "";
     const format = primary?.artifact.format ?? "markdown";
-    const art = createArtifact(nodeRunId, format, "");
-    finalizeArtifact(art.id, content, approval.editedContent ? { editedBy: "human" } : null);
+    const art = await createArtifact(nodeRunId, format, "");
+    await finalizeArtifact(art.id, content, approval.editedContent ? { editedBy: "human" } : null);
 
     // run을 다시 running으로.
-    setRunStatus(control.runId, "running", false);
+    await setRunStatus(control.runId, "running", false);
     control.paused = false;
-    this.emitRunStatus(control, "running");
-    this.settleSucceeded(control, node, nodeRunId, iter);
-    this.emitChatCard(control, "card_human", { event: "approved", nodeName: node.name }, nodeRunId);
+    await this.emitRunStatus(control, "running");
+    await this.settleSucceeded(control, node, nodeRunId, iter);
+    await this.emitChatCard(control, "card_human", { event: "approved", nodeName: node.name }, nodeRunId);
   }
 
   private pickPrimaryInput(
@@ -731,12 +741,13 @@ class Runner {
     iter: number,
     question: string,
   ): Promise<string> {
-    setNodeRunStatus(nodeRunId, "waiting_human", null);
+    // R1: DB 상태 쓰기를 await한 뒤에 SSE 통지.
+    await setNodeRunStatus(nodeRunId, "waiting_human", null);
     this.emitNodeStatus(control, node.id, nodeRunId, iter, "waiting_human");
-    setRunStatus(control.runId, "waiting_human", false);
-    this.emitRunStatus(control, "waiting_human");
+    await setRunStatus(control.runId, "waiting_human", false);
+    await this.emitRunStatus(control, "waiting_human");
     control.paused = true;
-    this.emitChatCard(
+    await this.emitChatCard(
       control,
       "card_human",
       { event: "gap_question", nodeName: node.name, question },
@@ -747,11 +758,11 @@ class Runner {
     const answer = await humanWait.waitForAnswer(nodeRunId);
 
     // 답변 도착 → 노드 실행 재개(SDK가 tool 결과로 이어감). run running 복귀.
-    setNodeRunStatus(nodeRunId, "running", null);
+    await setNodeRunStatus(nodeRunId, "running", null);
     this.emitNodeStatus(control, node.id, nodeRunId, iter, "running");
-    setRunStatus(control.runId, "running", false);
+    await setRunStatus(control.runId, "running", false);
     control.paused = false;
-    this.emitRunStatus(control, "running");
+    await this.emitRunStatus(control, "running");
     control.wake?.();
     return answer;
   }
@@ -761,12 +772,15 @@ class Runner {
   // =========================================================================
 
   /** Human 승인. 인메모리 대기가 있으면 해소, 없으면 재하이드레이션 후 해소(§8-E). */
-  approve(nodeRunId: string, editedContent?: string): { ok: boolean; error?: string } {
+  async approve(
+    nodeRunId: string,
+    editedContent?: string,
+  ): Promise<{ ok: boolean; error?: string }> {
     if (humanWait.resolveApproval(nodeRunId, { editedContent })) {
       return { ok: true };
     }
     // 재하이드레이션: DB에서 run·node_run 복구 후 러너 재구성.
-    const rehydrated = this.rehydrateForApproval(nodeRunId);
+    const rehydrated = await this.rehydrateForApproval(nodeRunId);
     if (!rehydrated) return { ok: false, error: "승인 대기 상태가 아닙니다" };
     if (humanWait.resolveApproval(nodeRunId, { editedContent })) {
       return { ok: true };
@@ -775,15 +789,17 @@ class Runner {
   }
 
   /** ask_human 답변. 대기가 없으면(세션 죽음) node_run failed 마감(§8-E). */
-  answer(nodeRunId: string, text: string): { ok: boolean; error?: string } {
+  async answer(nodeRunId: string, text: string): Promise<{ ok: boolean; error?: string }> {
     if (humanWait.resolveAnswer(nodeRunId, text)) {
       return { ok: true };
     }
     // 세션이 죽었으면 이 node_run을 failed로 마감(부분 재실행 유도).
-    const nr = db.select().from(nodeRunsTable).where(eq(nodeRunsTable.id, nodeRunId)).get();
+    const nr = (
+      await db.select().from(nodeRunsTable).where(eq(nodeRunsTable.id, nodeRunId)).limit(1)
+    )[0];
     if (nr && nr.status === "waiting_human") {
-      setNodeRunStatus(nodeRunId, "failed", "프로세스 재시작으로 갭 인터뷰 세션이 종료됨");
-      setRunStatus(nr.runId, "failed");
+      await setNodeRunStatus(nodeRunId, "failed", "프로세스 재시작으로 갭 인터뷰 세션이 종료됨");
+      await setRunStatus(nr.runId, "failed");
       return { ok: false, error: "세션이 종료되어 재실행이 필요합니다" };
     }
     return { ok: false, error: "답변 대기 상태가 아닙니다" };
@@ -793,28 +809,29 @@ class Runner {
    * approve 재하이드레이션(§8-E) — 프로세스 재시작 후 인메모리 control이 없을 때
    * DB 스냅샷·node_run에서 러너를 재구성하고 Human 대기 Promise를 다시 건다.
    */
-  private rehydrateForApproval(nodeRunId: string): boolean {
-    const nr = db.select().from(nodeRunsTable).where(eq(nodeRunsTable.id, nodeRunId)).get();
+  private async rehydrateForApproval(nodeRunId: string): Promise<boolean> {
+    const nr = (
+      await db.select().from(nodeRunsTable).where(eq(nodeRunsTable.id, nodeRunId)).limit(1)
+    )[0];
     if (!nr || nr.status !== "waiting_human") return false;
-    const run = getRun(nr.runId);
+    const run = await getRun(nr.runId);
     if (!run || run.status !== "waiting_human") return false;
     if (this.controls.has(run.id)) return true; // 이미 살아있음
 
-    const snapshot = getRunSnapshot(run.id);
+    const snapshot = await getRunSnapshot(run.id);
     if (!snapshot) return false;
 
     // 크래시로 남은 형제 node_run(running/queued)을 먼저 마감 — 재구성한 control이
     // 이들을 실행 중으로 오인해 중복 실행/유령 행을 남기지 않도록(대기 노드는 유지).
-    this.cleanupStaleSiblings(run.id);
+    await this.cleanupStaleSiblings(run.id);
 
     const control = this.buildControl(run.id, run.pipelineId, snapshot);
     // DB의 node_run 상태로 control 복원.
-    const rows = db
+    const rows = await db
       .select()
       .from(nodeRunsTable)
       .where(eq(nodeRunsTable.runId, run.id))
-      .orderBy(asc(nodeRunsTable.iteration))
-      .all();
+      .orderBy(asc(nodeRunsTable.iteration));
     for (const r of rows) {
       const key = keyOf(r.nodeId, r.iteration);
       control.nodeRunIdByKey.set(key, r.id);
@@ -868,12 +885,12 @@ class Runner {
    * - 각 상류의 "현재 회차" node_run 아티팩트를 취한다.
    * - Gate fail 재실행이면 직전 채점 JSON을 자동 포함(pendingFeedback).
    */
-  private collectInputs(
+  private async collectInputs(
     control: RunControl,
     nodeId: string,
     _iter: number,
-  ): UpstreamInput[] {
-    const inputs: UpstreamInput[] = this.gatherUpstreamInputs(
+  ): Promise<UpstreamInput[]> {
+    const inputs: UpstreamInput[] = await this.gatherUpstreamInputs(
       control,
       nodeId,
       new Set(),
@@ -905,11 +922,11 @@ class Runner {
    * 만나면 그 Gate의 flow 상류로 투명하게 파고들어 원본 아티팩트를 가져온다.
    * @param seen 순환 방지(Gate fail back-edge는 flowUpstream이 이미 제외).
    */
-  private gatherUpstreamInputs(
+  private async gatherUpstreamInputs(
     control: RunControl,
     nodeId: string,
     seen: Set<string>,
-  ): UpstreamInput[] {
+  ): Promise<UpstreamInput[]> {
     const inputs: UpstreamInput[] = [];
     for (const upId of this.flowUpstream(control, nodeId)) {
       const upNode = control.index.nodeById.get(upId);
@@ -921,7 +938,7 @@ class Runner {
         seen.add(upId);
         const edge = this.flowEdge(control, upId, nodeId);
         const baseOrder = edge?.inputOrder ?? 0;
-        for (const passed of this.gatherUpstreamInputs(control, upId, seen)) {
+        for (const passed of await this.gatherUpstreamInputs(control, upId, seen)) {
           inputs.push({ ...passed, order: passed.order + baseOrder });
         }
         continue;
@@ -930,7 +947,7 @@ class Runner {
       const upIter = control.iterationByNode.get(upId) ?? 1;
       const upNodeRunId = control.nodeRunIdByKey.get(keyOf(upId, upIter));
       if (!upNodeRunId) continue;
-      const artifact: Artifact | null = getArtifactByNodeRun(upNodeRunId);
+      const artifact: Artifact | null = await getArtifactByNodeRun(upNodeRunId);
       if (!artifact) continue;
       const edge = this.flowEdge(control, upId, nodeId);
       inputs.push({
@@ -963,33 +980,35 @@ class Runner {
   // =========================================================================
 
   /** (nodeId,iteration)에 대한 node_run을 보장(없으면 생성). id 반환. */
-  private ensureNodeRun(
+  private async ensureNodeRun(
     control: RunControl,
     nodeId: string,
     iteration: number,
     status: NodeRunStatus,
-  ): string {
+  ): Promise<string> {
     if (!control.iterationByNode.has(nodeId)) {
       control.iterationByNode.set(nodeId, iteration);
     }
     const key = keyOf(nodeId, iteration);
     const existing = control.nodeRunIdByKey.get(key);
     if (existing) return existing;
-    const nr = createNodeRun(control.runId, nodeId, status, iteration);
+    // R1: DB에 node_run을 만든 뒤(await) SSE 통지.
+    const nr = await createNodeRun(control.runId, nodeId, status, iteration);
     control.nodeRunIdByKey.set(key, nr.id);
     this.emitNodeStatus(control, nodeId, nr.id, iteration, status);
     return nr.id;
   }
 
-  private markNode(
+  private async markNode(
     control: RunControl,
     nodeId: string,
     nodeRunId: string,
     iteration: number,
     status: NodeRunStatus,
     error?: string,
-  ): void {
-    setNodeRunStatus(nodeRunId, status, error ?? null);
+  ): Promise<void> {
+    // R1: DB 상태 쓰기를 await한 뒤에 SSE 통지.
+    await setNodeRunStatus(nodeRunId, status, error ?? null);
     this.emitNodeStatus(control, nodeId, nodeRunId, iteration, status);
   }
 
@@ -998,15 +1017,15 @@ class Runner {
    * 인메모리는 현재 run의 빠른 경로, DB는 재시작·재하이드레이션의 진실
    * (schema.md node_runs.gate_decision).
    */
-  private recordGateDecision(
+  private async recordGateDecision(
     control: RunControl,
     nodeId: string,
     nodeRunId: string,
     iteration: number,
     decision: "pass" | "fail",
-  ): void {
+  ): Promise<void> {
     control.gateDecision.set(keyOf(nodeId, iteration), decision);
-    setNodeRunGateDecision(nodeRunId, decision);
+    await setNodeRunGateDecision(nodeRunId, decision);
   }
 
   private emitNodeStatus(
@@ -1019,8 +1038,8 @@ class Runner {
     eventBus.emitNodeStatus(control.runId, { nodeId, nodeRunId, iteration, status });
   }
 
-  private emitRunStatus(control: RunControl, status: RunStatus): void {
-    const done = this.countSucceeded(control.runId);
+  private async emitRunStatus(control: RunControl, status: RunStatus): Promise<void> {
+    const done = await this.countSucceeded(control.runId);
     eventBus.emitRunStatus(control.runId, {
       runId: control.runId,
       status,
@@ -1028,39 +1047,46 @@ class Runner {
     });
   }
 
-  private emitChatCard(
+  private async emitChatCard(
     control: RunControl,
     kind: "card_run" | "card_human",
     payload: unknown,
     nodeRunId?: string,
-  ): void {
-    eventBus.emitChatCard(control.pipelineId, kind, payload, control.runId, nodeRunId ?? null);
+  ): Promise<void> {
+    await eventBus.emitChatCard(
+      control.pipelineId,
+      kind,
+      payload,
+      control.runId,
+      nodeRunId ?? null,
+    );
   }
 
   // =========================================================================
   // 마감
   // =========================================================================
 
-  private finalizeRun(control: RunControl, status: RunStatus): void {
-    setRunStatus(control.runId, status);
+  private async finalizeRun(control: RunControl, status: RunStatus): Promise<void> {
+    // R1: DB 마감(await) 후 통지·카드 발행.
+    await setRunStatus(control.runId, status);
     this.controls.delete(control.runId);
-    this.emitRunStatus(control, status);
+    await this.emitRunStatus(control, status);
     this.clearFeedback(control.runId);
-    this.emitChatCard(control, "card_run", {
+    await this.emitChatCard(control, "card_run", {
       event: status,
       title: statusTitle(status),
     });
   }
 
-  private finishGateFailed(control: RunControl): void {
+  private async finishGateFailed(control: RunControl): Promise<void> {
     const reason = control.gateFailedReason!;
     // 남은 미처리 노드는 skipped.
-    this.skipUnhandled(control);
-    setRunStatus(control.runId, "gate_failed");
+    await this.skipUnhandled(control);
+    await setRunStatus(control.runId, "gate_failed");
     this.controls.delete(control.runId);
-    this.emitRunStatus(control, "gate_failed");
+    await this.emitRunStatus(control, "gate_failed");
     this.clearFeedback(control.runId);
-    this.emitChatCard(control, "card_run", {
+    await this.emitChatCard(control, "card_run", {
       event: "gate_failed",
       title: "게이트 실패(최대 루프 초과)",
       gateName: reason.gateName,
@@ -1069,23 +1095,25 @@ class Runner {
     });
   }
 
-  private finishCancelled(control: RunControl): void {
-    this.skipUnhandled(control);
-    setRunStatus(control.runId, "cancelled");
+  private async finishCancelled(control: RunControl): Promise<void> {
+    await this.skipUnhandled(control);
+    await setRunStatus(control.runId, "cancelled");
     this.controls.delete(control.runId);
-    this.emitRunStatus(control, "cancelled");
+    await this.emitRunStatus(control, "cancelled");
     this.clearFeedback(control.runId);
-    this.emitChatCard(control, "card_run", { event: "cancelled", title: "실행 중단" });
+    await this.emitChatCard(control, "card_run", { event: "cancelled", title: "실행 중단" });
   }
 
-  private skipUnhandled(control: RunControl): void {
+  private async skipUnhandled(control: RunControl): Promise<void> {
     for (const node of control.snapshot.nodes) {
       if (node.type === "skill" || node.type === "rule" || node.type === "tool") continue;
       const iter = control.iterationByNode.get(node.id) ?? 1;
       const key = keyOf(node.id, iter);
       if (control.succeeded.has(key) || control.failedOrSkipped.has(key)) continue;
-      const nrId = control.nodeRunIdByKey.get(key) ?? this.ensureNodeRun(control, node.id, iter, "queued");
-      this.markNode(control, node.id, nrId, iter, "skipped");
+      const nrId =
+        control.nodeRunIdByKey.get(key) ??
+        (await this.ensureNodeRun(control, node.id, iter, "queued"));
+      await this.markNode(control, node.id, nrId, iter, "skipped");
       control.failedOrSkipped.add(key);
     }
   }
@@ -1096,26 +1124,28 @@ class Runner {
     }
   }
 
-  private countSucceeded(runId: string): number {
-    const rows = db
+  private async countSucceeded(runId: string): Promise<number> {
+    const rows = await db
       .select({ status: nodeRunsTable.status })
       .from(nodeRunsTable)
-      .where(eq(nodeRunsTable.runId, runId))
-      .all();
+      .where(eq(nodeRunsTable.runId, runId));
     return rows.filter((r) => r.status === "succeeded").length;
   }
 
   /** 인메모리 제어가 없는 running run을 강제 마감(cancel·복구용). */
-  private forceFinalizeOrphan(runId: string, status: RunStatus = "failed"): void {
-    db.update(nodeRunsTable)
+  private async forceFinalizeOrphan(
+    runId: string,
+    status: RunStatus = "failed",
+  ): Promise<void> {
+    await db
+      .update(nodeRunsTable)
       .set({ status: "failed", endedAt: Date.now(), error: "프로세스 재시작으로 중단" })
-      .where(and(eq(nodeRunsTable.runId, runId), inArray(nodeRunsTable.status, ["running", "waiting_human"])))
-      .run();
-    db.update(nodeRunsTable)
+      .where(and(eq(nodeRunsTable.runId, runId), inArray(nodeRunsTable.status, ["running", "waiting_human"])));
+    await db
+      .update(nodeRunsTable)
       .set({ status: "skipped", endedAt: Date.now() })
-      .where(and(eq(nodeRunsTable.runId, runId), eq(nodeRunsTable.status, "queued")))
-      .run();
-    setRunStatus(runId, status);
+      .where(and(eq(nodeRunsTable.runId, runId), eq(nodeRunsTable.status, "queued")));
+    await setRunStatus(runId, status);
   }
 
   // =========================================================================
@@ -1127,41 +1157,39 @@ class Runner {
    * waiting_human run은 복원 유지(마감 안 함, m2-plan §복구) — approve 시
    * rehydrateForApproval로 재구성한다.
    */
-  recoverOnBoot(): void {
-    const runningRuns = db
+  async recoverOnBoot(): Promise<void> {
+    const runningRuns = await db
       .select({ id: runsTable.id })
       .from(runsTable)
-      .where(eq(runsTable.status, "running"))
-      .all();
+      .where(eq(runsTable.status, "running"));
     for (const r of runningRuns) {
       if (this.controls.has(r.id)) continue;
-      this.forceFinalizeOrphan(r.id, "failed");
+      await this.forceFinalizeOrphan(r.id, "failed");
     }
     // waiting_human run은 복원 유지(마감 안 함) — approve로 재개. 단, 크래시로
     // 남은 병렬 형제 node_run(running/queued)은 인메모리 실행이 사라져 재개
     // 불가하므로 failed로 마감한다(재개 시 중복 실행·유령 행 방지). 대기 노드
     // (status=waiting_human) 자체는 건드리지 않는다.
-    const waitingRuns = db
+    const waitingRuns = await db
       .select({ id: runsTable.id })
       .from(runsTable)
-      .where(eq(runsTable.status, "waiting_human"))
-      .all();
+      .where(eq(runsTable.status, "waiting_human"));
     for (const r of waitingRuns) {
       if (this.controls.has(r.id)) continue;
-      this.cleanupStaleSiblings(r.id);
+      await this.cleanupStaleSiblings(r.id);
     }
   }
 
   /** waiting_human run에서 크래시로 남은 running/queued 형제 node_run을 마감. */
-  private cleanupStaleSiblings(runId: string): void {
-    db.update(nodeRunsTable)
+  private async cleanupStaleSiblings(runId: string): Promise<void> {
+    await db
+      .update(nodeRunsTable)
       .set({ status: "failed", endedAt: Date.now(), error: "프로세스 재시작으로 중단" })
-      .where(and(eq(nodeRunsTable.runId, runId), eq(nodeRunsTable.status, "running")))
-      .run();
-    db.update(nodeRunsTable)
+      .where(and(eq(nodeRunsTable.runId, runId), eq(nodeRunsTable.status, "running")));
+    await db
+      .update(nodeRunsTable)
       .set({ status: "skipped", endedAt: Date.now() })
-      .where(and(eq(nodeRunsTable.runId, runId), eq(nodeRunsTable.status, "queued")))
-      .run();
+      .where(and(eq(nodeRunsTable.runId, runId), eq(nodeRunsTable.status, "queued")));
   }
 
   isActive(runId: string): boolean {
@@ -1169,18 +1197,20 @@ class Runner {
   }
 
   /** 부분 재실행의 상류 출처 = 직전 완료(succeeded/gate_failed/failed 등 종결) run. */
-  latestFinishedRunId(pipelineId: string): string | null {
-    const row = db
-      .select({ id: runsTable.id })
-      .from(runsTable)
-      .where(
-        and(
-          eq(runsTable.pipelineId, pipelineId),
-          inArray(runsTable.status, ["succeeded", "failed", "gate_failed", "cancelled"]),
-        ),
-      )
-      .orderBy(desc(runsTable.startedAt))
-      .get();
+  async latestFinishedRunId(pipelineId: string): Promise<string | null> {
+    const row = (
+      await db
+        .select({ id: runsTable.id })
+        .from(runsTable)
+        .where(
+          and(
+            eq(runsTable.pipelineId, pipelineId),
+            inArray(runsTable.status, ["succeeded", "failed", "gate_failed", "cancelled"]),
+          ),
+        )
+        .orderBy(desc(runsTable.startedAt))
+        .limit(1)
+    )[0];
     return row?.id ?? null;
   }
 }
@@ -1194,13 +1224,16 @@ class Runner {
  * 이상 정의를 참조하지 않는(자족) 불변 사진이어야 하기 때문(정의 변경·삭제
  * 무관). resolveNodeConfig는 DB를 읽으므로 스냅샷 생성 1회만 호출된다.
  */
-function resolveGraph(graph: Graph): Graph {
-  return {
-    nodes: graph.nodes.map((n) => ({
+async function resolveGraph(graph: Graph): Promise<Graph> {
+  const nodes = await Promise.all(
+    graph.nodes.map(async (n) => ({
       ...n,
       blockDefId: null,
-      config: resolveNodeConfig(n),
+      config: await resolveNodeConfig(n),
     })),
+  );
+  return {
+    nodes,
     edges: graph.edges,
   };
 }

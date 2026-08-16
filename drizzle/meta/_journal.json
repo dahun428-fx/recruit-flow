@@ -1,40 +1,12 @@
 {
   "version": "7",
-  "dialect": "sqlite",
+  "dialect": "postgresql",
   "entries": [
     {
       "idx": 0,
-      "version": "6",
-      "when": 1784878112614,
-      "tag": "0000_mighty_invisible_woman",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1786685834362,
-      "tag": "0001_whole_shard",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1786685834363,
-      "tag": "0002_nodes_block_def_id",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1786849798034,
-      "tag": "0003_long_charles_xavier",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1786869998675,
-      "tag": "0004_silly_fabian_cortez",
+      "version": "7",
+      "when": 1786877369921,
+      "tag": "0000_living_maximus",
       "breakpoints": true
     }
   ]

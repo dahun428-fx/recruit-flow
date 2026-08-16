@@ -8,11 +8,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  if (!getPipeline(id)) {
+  if (!(await getPipeline(id))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   const cursor = eventBus.getPipelineCursor(id);
-  return NextResponse.json(listChatMessages(id), {
+  return NextResponse.json(await listChatMessages(id), {
     headers: { "X-Stream-Cursor": String(cursor) },
   });
 }

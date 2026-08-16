@@ -12,8 +12,8 @@ import { deleteFolder, moveFolder, renameFolder } from "@/lib/db/queries";
 import { folders } from "@/lib/db/schema";
 import type { Folder } from "@/lib/types";
 
-function getFolder(id: string): Folder | null {
-  const row = db.select().from(folders).where(eq(folders.id, id)).get();
+async function getFolder(id: string): Promise<Folder | null> {
+  const row = (await db.select().from(folders).where(eq(folders.id, id)).limit(1))[0];
   return row ? { id: row.id, name: row.name, parentId: row.parentId ?? null, createdAt: row.createdAt } : null;
 }
 
@@ -40,7 +40,7 @@ export async function PATCH(
     if (trimmed === "") {
       return NextResponse.json({ error: "name must not be empty" }, { status: 400 });
     }
-    const renamed = renameFolder(id, trimmed);
+    const renamed = await renameFolder(id, trimmed);
     if (!renamed) {
       return NextResponse.json({ error: "not found" }, { status: 404 });
     }
@@ -49,11 +49,11 @@ export async function PATCH(
   // 이동(parentId 키가 명시적으로 존재할 때 — undefined 아닌 null 포함)
   if (hasParentId) {
     const parentId = body.parentId ?? null;
-    const ok = moveFolder(id, parentId);
+    const ok = await moveFolder(id, parentId);
     if (!ok) {
       // moveFolder는 ①폴더 없음 ②대상 폴더 없음 ③순환 모두 false 반환.
       // 폴더 존재 여부를 재확인해 404/400 구분.
-      const exists = getFolder(id);
+      const exists = await getFolder(id);
       if (!exists) {
         return NextResponse.json({ error: "not found" }, { status: 404 });
       }
@@ -64,7 +64,7 @@ export async function PATCH(
     }
   }
 
-  const result = getFolder(id);
+  const result = await getFolder(id);
   if (!result) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
@@ -76,7 +76,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const ok = deleteFolder(id);
+  const ok = await deleteFolder(id);
   if (!ok) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }

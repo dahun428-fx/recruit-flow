@@ -45,3 +45,21 @@ run에 owner_id 각인(러너 service_role 쓰기 격리 R3). run active 1개 �
 
 ## 착수: Phase 1 (데이터 레이어)
 Phase 0 결정 완료 → Phase 1 착수. auth·배포·과금과 분리 가능, 로컬 검증, 되돌리기 쉬움.
+
+## 진행 상태
+
+- ✅ **Phase 0** — 6개 스펙 결정 확정·커밋(`d9058bd`).
+- ✅ **Phase 1 (데이터 레이어)** — 2026-08-16 완료.
+  - **앱코드 원자 전환**: `schema.ts` pg-core(`bigint`/`jsonb`/`boolean`/`doublePrecision`),
+    `client.ts` postgres.js, `queries.ts` 전체 async(트랜잭션 5곳 포함), 러너/노드/이벤트/
+    instrumentation/18개 API 라우트 await 리플, deps 교체(better-sqlite3 제거→postgres),
+    next/drizzle config, sqlite 마이그레이션 아카이브 + pg `0000` 신규.
+  - **R1(트랜잭션 async가 러너 순서 붕괴) — 실증으로 해소**: `emitChatCard`·러너 emit이
+    모두 "DB await 후 SSE 발행". e2e의 gate 루프·human 재개(SSE) 경로가 pg에서 통과.
+  - **검증**: `tsc --noEmit` GREEN(Node 23), **e2e 31 passed + 1 flaky**(known 첫컴파일
+    가시성 flake, 재시도 통과) against pg, ETL 112행 적재(jsonb=object·bool·한글·FK 무결).
+  - **하네스**: e2e 전용 `recruit_flow_e2e` DB(스키마 리셋→migrate→seed). `DATABASE_URL` 사용.
+  - **⚠ 후속 연기**: `scripts/smoke-*.mts`(엔진/챗 스모크)는 대량 async 재작성 필요 +
+    e2e와 중복이라 이관 연기. `scripts/{e2e-heal,import-my-recruit,*-canonical-live}.mts`도
+    pg 포팅 대기(import-my-recruit는 Step 1에서 부분 전환됨).
+- ⏳ **Phase 2~5** — 미착수(auth/RLS → 배포 → BYO키 → realtime).

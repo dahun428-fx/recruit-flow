@@ -1,32 +1,36 @@
-// recruit-flow DB 스키마 (Drizzle / better-sqlite3)
+// recruit-flow DB 스키마 (Drizzle / postgres.js — pg-core).
 // 계약서: specs/schema.md — 9개 테이블(+ document_versions = 10개 실 테이블).
-// id는 전부 text(nanoid), 시각은 integer(unixepoch ms).
-// M1에서 block_defs·chat_messages는 테이블만 정의(미사용).
+// id는 전부 text(nanoid), 시각은 bigint(unixepoch ms, mode:"number").
+// 재플랫폼 Phase 1(2026-08-16): sqlite-core → pg-core 방언 전환. 테이블·컬럼·
+// 관계 계약은 불변. folders.parentId·documents.folderId는 진짜 FK로 승격하되
+// 순환 검증은 앱 레벨 유지(schema.md 방언 델타).
 
-import { sql } from "drizzle-orm";
 import {
-  integer,
-  real,
-  sqliteTable,
+  type AnyPgColumn,
+  bigint,
+  boolean,
+  doublePrecision,
+  jsonb,
+  pgTable,
   text,
-} from "drizzle-orm/sqlite-core";
+} from "drizzle-orm/pg-core";
 
 // ---------------------------------------------------------------------------
 // pipelines
 // ---------------------------------------------------------------------------
-export const pipelines = sqliteTable("pipelines", {
+export const pipelines = pgTable("pipelines", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
-  createdAt: integer("created_at").notNull(),
-  updatedAt: integer("updated_at").notNull(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
   // 앱 진입 시 "마지막 파이프라인" 결정
-  lastOpenedAt: integer("last_opened_at"),
+  lastOpenedAt: bigint("last_opened_at", { mode: "number" }),
 });
 
 // ---------------------------------------------------------------------------
 // nodes — 편집 중인 현재 그래프
 // ---------------------------------------------------------------------------
-export const nodes = sqliteTable("nodes", {
+export const nodes = pgTable("nodes", {
   id: text("id").primaryKey(),
   pipelineId: text("pipeline_id")
     .notNull()
@@ -34,8 +38,8 @@ export const nodes = sqliteTable("nodes", {
   // agent/input/output/gate/human/skill/rule/tool
   type: text("type").notNull(),
   name: text("name").notNull(),
-  positionX: real("position_x").notNull(),
-  positionY: real("position_y").notNull(),
+  positionX: doublePrecision("position_x").notNull(),
+  positionY: doublePrecision("position_y").notNull(),
   // M4 결정 1·4-A: 참조+오버라이드 시맨틱.
   // null=맨손 노드(config 완결). non-null=정의 참조(config는 오버라이드 필드만).
   // 정의 삭제 시 SET NULL — 노드는 맨손으로 남는다.
@@ -43,15 +47,15 @@ export const nodes = sqliteTable("nodes", {
     onDelete: "set null",
   }),
   // 타입별 속성(nodes.md) — JSON. blockDefId 있으면 오버라이드 필드만.
-  config: text("config", { mode: "json" }).notNull(),
-  createdAt: integer("created_at").notNull(),
-  updatedAt: integer("updated_at").notNull(),
+  config: jsonb("config").notNull(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 });
 
 // ---------------------------------------------------------------------------
 // edges
 // ---------------------------------------------------------------------------
-export const edges = sqliteTable("edges", {
+export const edges = pgTable("edges", {
   id: text("id").primaryKey(),
   pipelineId: text("pipeline_id")
     .notNull()
@@ -63,31 +67,31 @@ export const edges = sqliteTable("edges", {
   // Gate만 pass/fail
   sourceHandle: text("source_handle"),
   // Q11 입력 순번(엣지 클릭으로 조정)
-  inputOrder: integer("input_order").notNull().default(0),
+  inputOrder: bigint("input_order", { mode: "number" }).notNull().default(0),
 });
 
 // ---------------------------------------------------------------------------
 // block_defs — 팔레트 하위 항목(저장된 정의). M1 미사용.
 // ---------------------------------------------------------------------------
-export const blockDefs = sqliteTable("block_defs", {
+export const blockDefs = pgTable("block_defs", {
   id: text("id").primaryKey(),
   type: text("type").notNull(),
   name: text("name").notNull(),
   description: text("description"),
-  config: text("config", { mode: "json" }).notNull(),
-  // 하위 항목별 활성/비활성(Q10-B)
-  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  config: jsonb("config").notNull(),
+  // 하위 항목별 활성/비활성(Q10-B) — M4부터 미사용(마이그레이션 회피용 잔존).
+  enabled: boolean("enabled").notNull().default(true),
   // human / chatbot / import
   origin: text("origin").notNull(),
   // true = 새 블록 트레이 대기(챗봇 add, 미승인). 캔버스 드래그 승인 시 false
-  tray: integer("tray", { mode: "boolean" }).notNull().default(false),
-  createdAt: integer("created_at").notNull(),
+  tray: boolean("tray").notNull().default(false),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
 });
 
 // ---------------------------------------------------------------------------
 // runs
 // ---------------------------------------------------------------------------
-export const runs = sqliteTable("runs", {
+export const runs = pgTable("runs", {
   id: text("id").primaryKey(),
   pipelineId: text("pipeline_id")
     .notNull()
@@ -95,20 +99,20 @@ export const runs = sqliteTable("runs", {
   // running / waiting_human / succeeded / failed / gate_failed / cancelled
   status: text("status").notNull(),
   // 시작 시 nodes+edges 전체 복사(JSON)
-  graphSnapshot: text("graph_snapshot", { mode: "json" }).notNull(),
+  graphSnapshot: jsonb("graph_snapshot").notNull(),
   // 부분 재실행 시 아티팩트 재사용 출처(직전 완료 run)
   upstreamRunId: text("upstream_run_id"),
   // M5 워크스트림 D: JD별 run 그룹핑용 자유 라벨(회사/직군명).
   // run 시작 시 Input 노드의 JD 문서 내용 첫 줄에서 자동 도출.
   label: text("label"),
-  startedAt: integer("started_at").notNull(),
-  endedAt: integer("ended_at"),
+  startedAt: bigint("started_at", { mode: "number" }).notNull(),
+  endedAt: bigint("ended_at", { mode: "number" }),
 });
 
 // ---------------------------------------------------------------------------
 // node_runs — run별 노드 실행 기록
 // ---------------------------------------------------------------------------
-export const nodeRuns = sqliteTable("node_runs", {
+export const nodeRuns = pgTable("node_runs", {
   id: text("id").primaryKey(),
   runId: text("run_id")
     .notNull()
@@ -116,21 +120,21 @@ export const nodeRuns = sqliteTable("node_runs", {
   // 스냅샷 내 노드 id
   nodeId: text("node_id").notNull(),
   // Gate 루프 회차(1부터)
-  iteration: integer("iteration").notNull().default(1),
+  iteration: bigint("iteration", { mode: "number" }).notNull().default(1),
   // queued / running / waiting_human / succeeded / failed / skipped
   status: text("status").notNull(),
   // Gate 전용 라우팅 결정 — pass / fail. Gate 외 노드는 null.
   // Gate는 판정 후 항상 succeeded로 마감하므로 status로는 복원 불가(schema.md).
   gateDecision: text("gate_decision"),
   error: text("error"),
-  startedAt: integer("started_at"),
-  endedAt: integer("ended_at"),
+  startedAt: bigint("started_at", { mode: "number" }),
+  endedAt: bigint("ended_at", { mode: "number" }),
 });
 
 // ---------------------------------------------------------------------------
 // artifacts — 노드 실행 1회 = 아티팩트 1개
 // ---------------------------------------------------------------------------
-export const artifacts = sqliteTable("artifacts", {
+export const artifacts = pgTable("artifacts", {
   id: text("id").primaryKey(),
   nodeRunId: text("node_run_id")
     .notNull()
@@ -140,54 +144,56 @@ export const artifacts = sqliteTable("artifacts", {
   // 스트리밍 중 주기적 append-flush, 완료 시 확정
   content: text("content").notNull().default(""),
   // Input: 문서 버전 번호 / Human: 편집 주체 등
-  meta: text("meta", { mode: "json" }),
-  createdAt: integer("created_at").notNull(),
+  meta: jsonb("meta"),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
 });
 
 // ---------------------------------------------------------------------------
 // folders — 문서 임의 폴더 하이라키 (schema.md §folders)
-// 순환 금지·parent_id 존재 검증은 SQLite ADD COLUMN 한계로 앱 레벨 강제.
+// parent_id 자기참조 FK(nullable). 순환 금지·존재 검증은 앱 레벨 강제(방언 델타).
 // ---------------------------------------------------------------------------
-export const folders = sqliteTable("folders", {
+export const folders = pgTable("folders", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
-  // 상위 폴더(null=루트 직속). FK 선언은 하되 SQLite 앱 레벨 강제.
-  parentId: text("parent_id").references((): ReturnType<typeof text> => folders.id),
-  createdAt: integer("created_at").notNull(),
+  // 상위 폴더(null=루트 직속). 진짜 FK지만 순환 검증은 앱 레벨.
+  parentId: text("parent_id").references((): AnyPgColumn => folders.id),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
 });
 
 // ---------------------------------------------------------------------------
 // documents / document_versions — 본문은 versions에만 존재
 // ---------------------------------------------------------------------------
-export const documents = sqliteTable("documents", {
+export const documents = pgTable("documents", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   // 현재 본문 = current_version 행
-  currentVersion: integer("current_version").notNull().default(0),
-  // M5(v2→현행): 소속 폴더(null=루트). FK 선언, 앱 레벨 강제.
+  currentVersion: bigint("current_version", { mode: "number" })
+    .notNull()
+    .default(0),
+  // M5(v2→현행): 소속 폴더(null=루트). 진짜 FK, 앱 레벨 강제.
   folderId: text("folder_id").references(() => folders.id),
-  createdAt: integer("created_at").notNull(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
 });
 
-export const documentVersions = sqliteTable("document_versions", {
+export const documentVersions = pgTable("document_versions", {
   id: text("id").primaryKey(),
   documentId: text("document_id")
     .notNull()
     .references(() => documents.id, { onDelete: "cascade" }),
-  version: integer("version").notNull(),
+  version: bigint("version", { mode: "number" }).notNull(),
   // 전문
   content: text("content").notNull(),
   // human / llm
   author: text("author").notNull(),
   // 변경 요약
   note: text("note"),
-  createdAt: integer("created_at").notNull(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
 });
 
 // ---------------------------------------------------------------------------
 // chat_messages — 파이프라인당 1 스레드. M1 미사용.
 // ---------------------------------------------------------------------------
-export const chatMessages = sqliteTable("chat_messages", {
+export const chatMessages = pgTable("chat_messages", {
   id: text("id").primaryKey(),
   pipelineId: text("pipeline_id")
     .notNull()
@@ -195,11 +201,8 @@ export const chatMessages = sqliteTable("chat_messages", {
   // user / assistant / card_block / card_human / card_run
   kind: text("kind").notNull(),
   // 텍스트 또는 카드 데이터(JSON)
-  payload: text("payload", { mode: "json" }).notNull(),
+  payload: jsonb("payload").notNull(),
   runId: text("run_id"),
   nodeRunId: text("node_run_id"),
-  createdAt: integer("created_at").notNull(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
 });
-
-// 마이그레이션 생성 시 sql 헬퍼 존재를 강제하지 않도록 참조만 유지.
-export const _schemaSqlRef = sql;

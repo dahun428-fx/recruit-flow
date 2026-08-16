@@ -50,25 +50,31 @@ export async function runAgentNode(
   const askHandler: AskHumanHandler | undefined =
     config.gapMode === "ask" ? askHuman : undefined;
 
-  const art = createArtifact(nodeRunId, format, "");
+  const art = await createArtifact(nodeRunId, format, "");
 
   let buffer = "";
   let lastFlushed = "";
   let lastFlushAt = Date.now();
 
-  const flush = (force = false) => {
-    if (!force && Date.now() - lastFlushAt < FLUSH_INTERVAL_MS) return;
-    if (buffer === lastFlushed) return;
-    updateArtifactContent(art.id, buffer);
-    lastFlushed = buffer;
+  // 주기적 flush는 누적 버퍼의 DB 스냅샷(스트리밍 중간 저장)이다. onDelta 콜백은
+  // SDK가 동기 호출하므로 여기서 DB await로 블로킹하지 않고 fire-and-forget한다
+  // (완료 시 finalizeArtifact가 await로 확정 — 그것이 진실). force=true(최종)일 때만
+  // Promise를 반환해 호출자가 확정 전에 await할 수 있게 한다.
+  const flush = (force = false): Promise<void> => {
+    if (!force && Date.now() - lastFlushAt < FLUSH_INTERVAL_MS) return Promise.resolve();
+    if (buffer === lastFlushed) return Promise.resolve();
+    const snapshot = buffer;
+    lastFlushed = snapshot;
     lastFlushAt = Date.now();
+    return updateArtifactContent(art.id, snapshot);
   };
 
   const onDelta = (chunk: string) => {
     const offset = buffer.length;
     buffer += chunk;
     eventBus.emitArtifactDelta(runId, { nodeRunId, offset, chunk });
-    flush(false);
+    // 주기 flush는 대기하지 않는다(중간 스냅샷). 오류는 무시(최종 확정이 진실).
+    void flush(false).catch(() => {});
   };
 
   try {
@@ -83,7 +89,7 @@ export async function runAgentNode(
         mountedTools,
         askHuman: askHandler,
       });
-      finalizeArtifact(art.id, text, null);
+      await finalizeArtifact(art.id, text, null);
       return { ...art, content: text };
     }
 
@@ -96,11 +102,11 @@ export async function runAgentNode(
       mountedTools,
       askHuman: askHandler,
     });
-    flush(true);
-    finalizeArtifact(art.id, text, null);
+    await flush(true);
+    await finalizeArtifact(art.id, text, null);
     return { ...art, content: text };
   } catch (e) {
-    flush(true);
+    await flush(true);
     throw e;
   }
 }

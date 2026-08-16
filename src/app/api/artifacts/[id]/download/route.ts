@@ -9,7 +9,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const artifact = getArtifact(id);
+  const artifact = await getArtifact(id);
   if (!artifact) {
     return new Response("not found", { status: 404 });
   }

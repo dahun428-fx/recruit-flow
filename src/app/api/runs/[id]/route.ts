@@ -12,7 +12,7 @@ export async function GET(
   // DB 조회 전에 캡처해야 한다. 이후 번호의 이벤트는 스냅샷과 겹치더라도
   // 클라이언트가 멱등 병합하고, 이 번호 이하의 영속 이벤트는 스냅샷이 덮는다.
   const cursor = eventBus.getRunCursor(id);
-  const state = getRunState(id);
+  const state = await getRunState(id);
   if (!state) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }

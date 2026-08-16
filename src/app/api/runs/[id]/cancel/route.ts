@@ -8,9 +8,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  if (!getRun(id)) {
+  if (!(await getRun(id))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
-  const result = runner.cancel(id);
+  const result = await runner.cancel(id);
   return NextResponse.json(result);
 }

@@ -10,10 +10,10 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  if (!getPipeline(id)) {
+  if (!(await getPipeline(id))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
-  return NextResponse.json(listRuns(id));
+  return NextResponse.json(await listRuns(id));
 }
 
 export async function POST(
@@ -21,12 +21,12 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  if (!getPipeline(id)) {
+  if (!(await getPipeline(id))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
   // 같은 파이프라인 동시 run 1개(v1).
-  const active = getActiveRun(id);
+  const active = await getActiveRun(id);
   if (active) {
     return NextResponse.json(
       { error: "이미 실행 중인 run이 있습니다", runId: active.id },
@@ -45,16 +45,16 @@ export async function POST(
 
   let result;
   if (fromNodeId) {
-    const upstreamRunId = runner.latestFinishedRunId(id);
+    const upstreamRunId = await runner.latestFinishedRunId(id);
     if (!upstreamRunId) {
       return NextResponse.json(
         { error: "부분 재실행할 이전 완료 run이 없습니다" },
         { status: 400 },
       );
     }
-    result = runner.startFrom(id, fromNodeId, upstreamRunId);
+    result = await runner.startFrom(id, fromNodeId, upstreamRunId);
   } else {
-    result = runner.start(id);
+    result = await runner.start(id);
   }
 
   if ("errors" in result) {

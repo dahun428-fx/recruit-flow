@@ -280,7 +280,7 @@ export function buildChatbotMcp(
       "저장된 블록 정의(팔레트·트레이) 목록을 반환한다. 이름·타입·설명·트레이 여부.",
       {},
       async () => {
-        const defs = listBlockDefs();
+        const defs = await listBlockDefs();
         if (defs.length === 0) return textResult("저장된 블록이 없습니다.");
         const lines = defs.map(
           (d) =>
@@ -299,7 +299,7 @@ export function buildChatbotMcp(
       "현재 파이프라인 그래프의 요약(노드 이름·타입, 엣지 배선)을 반환한다. config 전문은 제외.",
       {},
       async () => {
-        const graph = getGraph(pipelineId);
+        const graph = await getGraph(pipelineId);
         if (graph.nodes.length === 0) return textResult("그래프가 비어 있습니다(노드 없음).");
         const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
         const nodeLines = graph.nodes.map((n) => `- ${n.name} [${n.type}]`);
@@ -325,7 +325,7 @@ export function buildChatbotMcp(
       "문서 라이브러리의 문서 목록(id·이름·현재 버전)을 반환한다.",
       {},
       async () => {
-        const docs = listDocuments();
+        const docs = await listDocuments();
         if (docs.length === 0) return textResult("문서가 없습니다.");
         return textResult(
           docs.map((d) => `- ${d.id}: ${d.name} (v${d.currentVersion})`).join("\n"),
@@ -340,7 +340,7 @@ export function buildChatbotMcp(
       "문서 id로 문서 전문을 읽는다.",
       { id: z.string().describe("문서 id") },
       async (args) => {
-        const doc = getDocument(args.id);
+        const doc = await getDocument(args.id);
         if (!doc) return textResult(`문서를 찾을 수 없습니다: ${args.id}`);
         return textResult(`# ${doc.name} (v${doc.currentVersion})\n\n${doc.content}`);
       },
@@ -366,7 +366,7 @@ export function buildChatbotMcp(
       },
       async (args) => {
         const jdName = (args.jdDocName ?? "현재 JD").trim() || "현재 JD";
-        const docs = listDocuments();
+        const docs = await listDocuments();
         const jdMeta = docs.find((d) => d.name === jdName);
         if (!jdMeta) {
           return textResult(
@@ -374,7 +374,7 @@ export function buildChatbotMcp(
               `register_document(name="현재 JD", ...)로 JD를 먼저 등록하세요.`,
           );
         }
-        const jdDoc = getDocument(jdMeta.id);
+        const jdDoc = await getDocument(jdMeta.id);
         if (!jdDoc) return textResult(`JD 문서를 읽을 수 없습니다: ${jdName}`);
 
         // 증거 문서 결정: 지정되면 그 이름들, 아니면 JD·'현재 JD' 제외 전체.
@@ -394,7 +394,7 @@ export function buildChatbotMcp(
 
         const evidenceContents: { name: string; content: string }[] = [];
         for (const m of evidenceMetas) {
-          const d = getDocument(m.id);
+          const d = await getDocument(m.id);
           if (d) evidenceContents.push({ name: d.name, content: d.content });
         }
         const evidenceNorm = normalize(
@@ -464,7 +464,7 @@ export function buildChatbotMcp(
         if (!validated.ok) {
           return textResult(`블록을 만들 수 없습니다: ${validated.error}`);
         }
-        const def: BlockDef = createBlockDef({
+        const def: BlockDef = await createBlockDef({
           type,
           name: args.name,
           description: args.description ?? "",
@@ -474,14 +474,14 @@ export function buildChatbotMcp(
           enabled: true,
           upsert: false, // 항상 새 트레이 항목 — 기존 승인 블록 덮어쓰기 금지.
         });
-        // card_block 발행(payload = 결정 H).
+        // card_block 발행(payload = 결정 H). DB 먼저(진실) → SSE 통지(R1).
         const payload = {
           blockDefId: def.id,
           type: def.type,
           name: def.name,
           description: def.description,
         };
-        const message = appendChatMessage(pipelineId, "card_block", payload);
+        const message = await appendChatMessage(pipelineId, "card_block", payload);
         eventBus.emitChatMessage(pipelineId, message);
         // 트레이 갱신 통지 — 카드가 가리키는 항목이 팔레트에도 즉시 보이도록.
         eventBus.emitBlockDef("updated", def.id, def);
@@ -503,16 +503,16 @@ export function buildChatbotMcp(
         note: z.string().optional().describe("버전 노트"),
       },
       async (args) => {
-        const existing = listDocuments().find((d) => d.name === args.name);
+        const existing = (await listDocuments()).find((d) => d.name === args.name);
         if (existing) {
-          const updated = addDocumentVersion(existing.id, args.content, "llm", args.note);
+          const updated = await addDocumentVersion(existing.id, args.content, "llm", args.note);
           if (!updated) return textResult(`문서 갱신에 실패했습니다: ${args.name}`);
           eventBus.emitDocumentChanged("updated", updated.id, updated.currentVersion);
           return textResult(
             `문서 '${updated.name}'을 v${updated.currentVersion}으로 갱신했습니다.`,
           );
         }
-        const created = createDocument(args.name, args.content, "llm", args.note);
+        const created = await createDocument(args.name, args.content, "llm", args.note);
         eventBus.emitDocumentChanged("created", created.id, created.currentVersion);
         return textResult(`문서 '${created.name}'을 새로 등록했습니다(v1).`);
       },
@@ -532,9 +532,9 @@ export function buildChatbotMcp(
         note: z.string().optional().describe("버전 노트"),
       },
       async (args) => {
-        const existing = listDocuments().find((d) => d.name === args.name);
+        const existing = (await listDocuments()).find((d) => d.name === args.name);
         if (!existing) return textResult(`문서를 찾을 수 없습니다: ${args.name}`);
-        const doc = getDocument(existing.id);
+        const doc = await getDocument(existing.id);
         if (!doc) return textResult(`문서를 찾을 수 없습니다: ${args.name}`);
         if (args.old_string === "") {
           return textResult("old_string이 비어 있습니다. 바꿀 원문을 지정하세요.");
@@ -554,7 +554,7 @@ export function buildChatbotMcp(
           );
         }
         const newContent = parts.join(args.new_string);
-        const updated = addDocumentVersion(existing.id, newContent, "llm", args.note);
+        const updated = await addDocumentVersion(existing.id, newContent, "llm", args.note);
         if (!updated) return textResult(`문서 갱신에 실패했습니다: ${args.name}`);
         eventBus.emitDocumentChanged("updated", updated.id, updated.currentVersion);
         return textResult(
@@ -572,7 +572,7 @@ export function buildChatbotMcp(
         "그 내용을 사용자에게 자연어로 설명하라.",
       {},
       async () => {
-        const result = runner.start(pipelineId);
+        const result = await runner.start(pipelineId);
         if ("errors" in result) {
           const lines = result.errors.map((e) => `- (${e.code}) ${e.message}`);
           return textResult(

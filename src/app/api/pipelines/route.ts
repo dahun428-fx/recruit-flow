@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { createPipeline, listPipelines } from "@/lib/db/queries";
 
 export async function GET() {
-  return NextResponse.json(listPipelines());
+  return NextResponse.json(await listPipelines());
 }
 
 export async function POST(req: Request) {
@@ -13,5 +13,5 @@ export async function POST(req: Request) {
   if (!name) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
-  return NextResponse.json(createPipeline(name), { status: 201 });
+  return NextResponse.json(await createPipeline(name), { status: 201 });
 }

@@ -106,16 +106,19 @@ class RunEventBus {
    * M3: 카드를 파이프라인 채널로도 **미러** 발행 → ChatDock의 단일 pipeline
    * 구독에 run 이벤트와 챗봇 이벤트가 한 스트림으로 도달(engine.md §3).
    * @param runId SSE 라우팅 키(발행 대상 run). null이면 run 채널 통지 생략(DB·미러만).
+   *
+   * ★ R1: DB 쓰기(appendChatMessage)를 반드시 await로 끝낸 뒤에 SSE를 발행한다 —
+   *   구독자가 DB에 반영되지 않은 이벤트를 먼저 관찰하는 일이 없어야 한다(진실은 DB).
    */
-  emitChatCard(
+  async emitChatCard(
     pipelineId: string,
     kind: Extract<ChatMessageKind, "card_run" | "card_human">,
     payload: unknown,
     runId: string | null,
     nodeRunId?: string | null,
-  ): ChatMessage {
-    // DB 먼저(진실의 원천).
-    const message = appendChatMessage(pipelineId, kind, payload, runId, nodeRunId);
+  ): Promise<ChatMessage> {
+    // DB 먼저(진실의 원천) — await로 확정된 뒤에만 통지.
+    const message = await appendChatMessage(pipelineId, kind, payload, runId, nodeRunId);
     const event: SseEvent = { type: "chat_card", message };
     // run 스코프 통지(캔버스 사이드 등 run 구독).
     if (runId) this.emit(runId, event);

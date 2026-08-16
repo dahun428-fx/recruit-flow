@@ -83,7 +83,7 @@ function buildMcpConfig(
         "문서 라이브러리에서 id로 문서 전문을 읽는다.",
         { id: z.string().describe("문서 id") },
         async (args) => {
-          const doc = getDocument(args.id);
+          const doc = await getDocument(args.id);
           if (!doc) {
             return {
               content: [{ type: "text", text: `문서를 찾을 수 없습니다: ${args.id}` }],
@@ -108,11 +108,9 @@ function buildMcpConfig(
         { query: z.string().describe("검색 질의어") },
         async (args) => {
           const q = args.query.toLowerCase();
-          const matches = listDocuments()
-            .map((d) => {
-              const detail = getDocument(d.id);
-              return detail;
-            })
+          const docs = await listDocuments();
+          const details = await Promise.all(docs.map((d) => getDocument(d.id)));
+          const matches = details
             .filter(
               (d): d is NonNullable<typeof d> =>
                 !!d &&

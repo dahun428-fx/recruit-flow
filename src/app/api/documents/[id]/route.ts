@@ -10,7 +10,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const doc = getDocument(id);
+  const doc = await getDocument(id);
   if (!doc) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
@@ -32,7 +32,7 @@ export async function PUT(
       { status: 400 },
     );
   }
-  const doc = addDocumentVersion(id, body.content, "human", body.note);
+  const doc = await addDocumentVersion(id, body.content, "human", body.note);
   if (!doc) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
@@ -53,11 +53,11 @@ export async function PATCH(
   }
 
   // folderId=null → 루트로 이동, folderId=string → 해당 폴더로 이동
-  const ok = moveDocument(id, body.folderId ?? null);
+  const ok = await moveDocument(id, body.folderId ?? null);
   if (!ok) {
     // moveDocument는 ①문서 없음 ②폴더 없음 모두 false 반환.
     // 문서 존재 여부로 404/400 구분.
-    const doc = getDocument(id);
+    const doc = await getDocument(id);
     if (!doc) {
       return NextResponse.json({ error: "not found" }, { status: 404 });
     }
@@ -74,7 +74,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const ok = deleteDocument(id);
+  const ok = await deleteDocument(id);
   if (!ok) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
