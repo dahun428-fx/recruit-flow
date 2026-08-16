@@ -11,6 +11,12 @@ export async function seed(sql) {
   // Phase 2a Slice 1: 마이그레이션이 app_users에 usr_dev_default를 삽입하므로
   // 시드 단계에서는 별도 삽입 불필요. documents·block_defs에 owner_id만 세팅.
 
+  // Phase 2a Slice 5: 격리 e2e(phase2-isolation.spec)용 두 테스트 유저.
+  // app_users는 RLS 미적용 — admin(슈퍼유저) 시드에서 직접 삽입. FK 대상.
+  await sql`INSERT INTO app_users (id, email, created_at)
+    VALUES ('usr_a', 'a@e2e', ${now}), ('usr_b', 'b@e2e', ${now})
+    ON CONFLICT (id) DO NOTHING`;
+
   // 증거 문서 1개(문서 탭·Input 노드 테스트용).
   const docId = id();
   await sql`INSERT INTO documents (id, name, current_version, created_at, owner_id)

@@ -72,4 +72,15 @@ Phase 0 결정 완료 → Phase 1 착수. auth·배포·과금과 분리 가능,
   - **⚠ 후속 연기**: `scripts/smoke-*.mts`(엔진/챗 스모크)는 대량 async 재작성 필요 +
     e2e와 중복이라 이관 연기. `scripts/{e2e-heal,import-my-recruit,*-canonical-live}.mts`도
     pg 포팅 대기(import-my-recruit는 Step 1에서 부분 전환됨).
-- ⏳ **Phase 2~5** — 미착수(auth/RLS → 배포 → BYO키 → realtime).
+- ✅ **Phase 2a (로컬 우선 멀티유저)** — 2026-08-17 완료. 슬라이스 0(seam)·
+  1(스키마 0001 owner_id·app_users·R5)·2(앱필터)·3(러너 owner R3)·4(RLS 활성
+  0002·rf_app·예약커넥션 GUC)·5(SSE owner 스코프·프로비저닝·격리 e2e). 커밋
+  `622f0d1`·`18da349`·`77a1404`·(slice5). 격리가 **앱필터(1차)+pg RLS(2차)**
+  양층 강제. 검증: tsc·e2e 33+1flaky(known)·rls-verify 10/10·격리 e2e 6/6·
+  각 슬라이스 code-reviewer 보안 게이트. 계약: [auth.md](auth.md).
+  > 발견·해결: ALS를 globalThis 캐시 안 하면 HMR 재평가로 인스턴스 분리 →
+  > 간헐 "컨텍스트 없음" 500([[nextjs-hmr-singleton-globalthis]]). postgres.js
+  > ReservedSql는 `.begin`/`.options` 미노출 → 트랜잭션을 GUC 커넥션에 고정하는
+  > 몽키패치 필요. 챗 fire-and-forget은 runner.start가 자체 runWithUser로 처리.
+- ⏳ **Phase 2b** — Supabase GoTrue/JWT/로그인 UI (`resolveUserId`·`provisionUser`
+  스왑). **Phase 3~5** — 배포(지속 Node 호스트) → BYO키 → realtime.

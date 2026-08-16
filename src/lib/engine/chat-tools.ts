@@ -24,6 +24,7 @@ import {
   listDocuments,
 } from "../db/queries";
 import type { AgentConfig, BlockDef, NodeConfig, NodeType } from "../types";
+import { getCurrentUserId } from "../auth/context";
 import { eventBus } from "./events";
 import { runner } from "./runner";
 
@@ -484,7 +485,8 @@ export function buildChatbotMcp(
         const message = await appendChatMessage(pipelineId, "card_block", payload);
         eventBus.emitChatMessage(pipelineId, message);
         // 트레이 갱신 통지 — 카드가 가리키는 항목이 팔레트에도 즉시 보이도록.
-        eventBus.emitBlockDef("updated", def.id, def);
+        // 챗 컨텍스트(ALS 유효) → 현재 유저 채널에만(auth.md §6).
+        eventBus.emitBlockDef(getCurrentUserId(), "updated", def.id, def);
         return textResult(
           `블록 '${def.name}'(${def.type})을 트레이에 추가했습니다. ` +
             `팔레트의 '새 블록' 트레이에서 캔버스로 드래그해 배치·배선하세요.`,
@@ -507,13 +509,13 @@ export function buildChatbotMcp(
         if (existing) {
           const updated = await addDocumentVersion(existing.id, args.content, "llm", args.note);
           if (!updated) return textResult(`문서 갱신에 실패했습니다: ${args.name}`);
-          eventBus.emitDocumentChanged("updated", updated.id, updated.currentVersion);
+          eventBus.emitDocumentChanged(getCurrentUserId(), "updated", updated.id, updated.currentVersion);
           return textResult(
             `문서 '${updated.name}'을 v${updated.currentVersion}으로 갱신했습니다.`,
           );
         }
         const created = await createDocument(args.name, args.content, "llm", args.note);
-        eventBus.emitDocumentChanged("created", created.id, created.currentVersion);
+        eventBus.emitDocumentChanged(getCurrentUserId(), "created", created.id, created.currentVersion);
         return textResult(`문서 '${created.name}'을 새로 등록했습니다(v1).`);
       },
     ),
@@ -556,7 +558,7 @@ export function buildChatbotMcp(
         const newContent = parts.join(args.new_string);
         const updated = await addDocumentVersion(existing.id, newContent, "llm", args.note);
         if (!updated) return textResult(`문서 갱신에 실패했습니다: ${args.name}`);
-        eventBus.emitDocumentChanged("updated", updated.id, updated.currentVersion);
+        eventBus.emitDocumentChanged(getCurrentUserId(), "updated", updated.id, updated.currentVersion);
         return textResult(
           `문서 '${updated.name}'을 v${updated.currentVersion}으로 편집했습니다. ` +
             `1곳을 치환했습니다.`,

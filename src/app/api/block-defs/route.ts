@@ -6,6 +6,7 @@
 // 된다. `all` 파라미터는 하위호환으로 무시하고 항상 전체를 반환한다.
 import { NextResponse } from "next/server";
 import { createBlockDef, listBlockDefs } from "@/lib/db/queries";
+import { getCurrentUserId } from "@/lib/auth/context";
 import { eventBus } from "@/lib/engine/events";
 import type { NodeConfig, NodeType } from "@/lib/types";
 import { withUser } from "@/lib/auth/with-user";
@@ -42,7 +43,7 @@ export const POST = withUser(async (req: Request) => {
     tray: body.tray,
   });
 
-  // 트레이는 전역 → 열려 있는 모든 pipeline 채널에 통지(engine.md §3).
-  eventBus.emitBlockDef("updated", created.id, created);
+  // 트레이 통지 — block_defs는 owner_id 보유 → 해당 owner 채널에만(auth.md §6).
+  eventBus.emitBlockDef(getCurrentUserId(), "updated", created.id, created);
   return NextResponse.json(created, { status: 201 });
 });

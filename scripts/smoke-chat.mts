@@ -81,7 +81,7 @@ async function testPipelineChannel() {
   const pl = createPipeline("smoke-chat-channel");
 
   const received: SseEvent[] = [];
-  const unsub = eventBus.subscribePipeline(pl.id, (ev) => received.push(ev));
+  const unsub = eventBus.subscribePipeline(pl.id, "usr_dev_default", (ev) => received.push(ev));
   check("subscribePipeline 후 구독자 존재", eventBus.hasPipelineSubscribers(pl.id));
 
   // chat_delta
@@ -113,7 +113,7 @@ async function testAddBlock() {
   console.log("\n[2] add_block: tray=true block_def + card_block");
   const pl = createPipeline("smoke-chat-addblock");
   const received: SseEvent[] = [];
-  const unsub = eventBus.subscribePipeline(pl.id, (ev) => received.push(ev));
+  const unsub = eventBus.subscribePipeline(pl.id, "usr_dev_default", (ev) => received.push(ev));
 
   // MCP 서버에서 add_block tool 핸들러를 꺼내 직접 호출(스텁 없이 tool 로직 검증).
   const { mcpServers } = buildChatbotMcp(pl.id);
@@ -198,7 +198,7 @@ async function testEditDocument() {
   console.log("\n[2b] edit_document: 0/1/2+ 매치 + document_changed SSE");
   const pl = createPipeline("smoke-chat-editdoc");
   const received: SseEvent[] = [];
-  const unsub = eventBus.subscribePipeline(pl.id, (ev) => received.push(ev));
+  const unsub = eventBus.subscribePipeline(pl.id, "usr_dev_default", (ev) => received.push(ev));
 
   const { mcpServers } = buildChatbotMcp(pl.id);
   const registerDoc = findTool(mcpServers, "register_document")!;
@@ -283,7 +283,7 @@ async function testRunChatOrchestration() {
   const pl = createPipeline("smoke-chat-orchestrate");
 
   const received: SseEvent[] = [];
-  const unsub = eventBus.subscribePipeline(pl.id, (ev) => received.push(ev));
+  const unsub = eventBus.subscribePipeline(pl.id, "usr_dev_default", (ev) => received.push(ev));
 
   // runChat 스텁: onDelta 흘리고, 주입된 tools에서 add_block을 실제 호출한 뒤 최종 텍스트.
   (globalThis as Record<string, unknown>).__recruitFlowChatStub = async (params: RunChatParams) => {

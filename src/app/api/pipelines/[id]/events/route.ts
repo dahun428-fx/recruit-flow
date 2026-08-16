@@ -3,6 +3,7 @@
 // 이벤트: chat_delta · chat_message · chat_card(run 미러).
 // SSE는 통지, 진실의 원천은 DB(engine.md §3).
 import { getPipeline } from "@/lib/db/queries";
+import { getCurrentUserId } from "@/lib/auth/context";
 import { eventBus } from "@/lib/engine/events";
 import type { SequencedSseEvent } from "@/lib/types";
 import { withUser } from "@/lib/auth/with-user";
@@ -16,9 +17,14 @@ export const GET = withUser(async (
 ) => {
   const { id: pipelineId } = await ctx.params;
 
+  // 소유권 검증 — getPipeline은 owner 필터라 남의 파이프라인이면 null → 404.
   if (!(await getPipeline(pipelineId))) {
     return new Response("not found", { status: 404 });
   }
+
+  // owner를 스트림 시작 전에 캡처(ReadableStream.start는 나중에 호출될 수 있어
+  // ALS 컨텍스트가 소실될 수 있으므로 여기서 값으로 고정). auth.md §6.
+  const ownerId = getCurrentUserId();
 
   const encoder = new TextEncoder();
 
@@ -39,7 +45,7 @@ export const GET = withUser(async (
       // 초기 연결 확인 코멘트.
       controller.enqueue(encoder.encode(": connected\n\n"));
 
-      const unsubscribe = eventBus.subscribePipeline(pipelineId, send);
+      const unsubscribe = eventBus.subscribePipeline(pipelineId, ownerId, send);
 
       const cleanup = () => {
         if (closed) return;

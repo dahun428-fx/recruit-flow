@@ -16,6 +16,12 @@ import type {
 
 type Subscriber = (event: SequencedSseEvent) => void;
 
+/**
+ * pipeline 구독자 + 소유자(auth.md §6 SG-3). block_def·document_changed 같은
+ * 전역 통지는 이 ownerId로 스코프해 남의 변경이 다른 유저 채널에 새지 않게 한다.
+ */
+type PipelineSubscriber = { fn: Subscriber; ownerId: string };
+
 class RunEventBus {
   /** runId → subscriber 집합(캔버스·아티팩트 SSE — run 스코프). */
   private subscribers = new Map<string, Set<Subscriber>>();
@@ -23,8 +29,9 @@ class RunEventBus {
    * pipelineId → subscriber 집합(채팅 독 SSE — pipeline 스코프, M3).
    * run 유무와 무관하게 상시 연결. 챗봇 응답·트레이 카드 + card_run/human 미러가
    * 이 채널로 흐른다(engine.md §3 M3 채널 구조).
+   * 각 구독자는 ownerId를 함께 보관한다(전역 통지 owner 스코프용, auth.md §6).
    */
-  private pipelineSubscribers = new Map<string, Set<Subscriber>>();
+  private pipelineSubscribers = new Map<string, Set<PipelineSubscriber>>();
   private runSequences = new Map<string, number>();
   private pipelineSequences = new Map<string, number>();
 
@@ -43,18 +50,23 @@ class RunEventBus {
     };
   }
 
-  /** 파이프라인 스코프 구독(채팅 독, M3). run 유무 무관 상시. */
-  subscribePipeline(pipelineId: string, fn: Subscriber): () => void {
+  /**
+   * 파이프라인 스코프 구독(채팅 독, M3). run 유무 무관 상시.
+   * ownerId를 함께 보관 → 전역 통지(block_def/document_changed)를 owner 스코프로
+   * 좁힐 수 있다(auth.md §6). SSE 라우트는 `getCurrentUserId()`를 넘긴다.
+   */
+  subscribePipeline(pipelineId: string, ownerId: string, fn: Subscriber): () => void {
     let set = this.pipelineSubscribers.get(pipelineId);
     if (!set) {
       set = new Set();
       this.pipelineSubscribers.set(pipelineId, set);
     }
-    set.add(fn);
+    const entry: PipelineSubscriber = { fn, ownerId };
+    set.add(entry);
     return () => {
       const s = this.pipelineSubscribers.get(pipelineId);
       if (!s) return;
-      s.delete(fn);
+      s.delete(entry);
       if (s.size === 0) this.pipelineSubscribers.delete(pipelineId);
     };
   }
@@ -79,7 +91,7 @@ class RunEventBus {
     this.pipelineSequences.set(pipelineId, sequence);
     const set = this.pipelineSubscribers.get(pipelineId);
     if (!set) return;
-    for (const fn of set) {
+    for (const { fn } of set) {
       try {
         fn({ ...event, sequence });
       } catch {
@@ -144,15 +156,25 @@ class RunEventBus {
   }
 
   /**
-   * 열려 있는 **모든** pipeline 채널에 발행(engine.md §3).
-   * block_defs처럼 pipeline_id가 없는 전역 테이블의 변경 통지용 —
-   * 특정 채널을 고를 수 없으므로 브로드캐스트가 유일하게 옳은 라우팅이다.
+   * 특정 **소유자**의 열려 있는 pipeline 채널에만 발행(auth.md §6 SG-3).
+   * block_defs·documents처럼 pipeline_id가 없는 전역(그러나 owner_id는 있는)
+   * 테이블의 변경 통지용 — 다른 유저의 채널로 새면 크로스 테넌트 알림 누수다.
+   *
+   * 시퀀스는 pipeline 채널별 단조 증가를 유지한다: ownerId가 일치하는 구독자를
+   * 실제로 **가진** 채널에서만 시퀀스를 올리고 발행한다. 매칭 구독자가 없는
+   * 채널은 건드리지 않아, 각 채널이 자신이 받은 이벤트에 대해서만 연속된
+   * 시퀀스를 관찰한다.
    */
-  emitToAllPipelines(event: SseEvent): void {
+  emitToOwner(ownerId: string, event: SseEvent): void {
     for (const [pipelineId, set] of this.pipelineSubscribers) {
+      const targets: PipelineSubscriber[] = [];
+      for (const sub of set) {
+        if (sub.ownerId === ownerId) targets.push(sub);
+      }
+      if (targets.length === 0) continue;
       const sequence = (this.pipelineSequences.get(pipelineId) ?? 0) + 1;
       this.pipelineSequences.set(pipelineId, sequence);
-      for (const fn of set) {
+      for (const { fn } of targets) {
         try {
           fn({ ...event, sequence });
         } catch {
@@ -162,26 +184,32 @@ class RunEventBus {
     }
   }
 
-  /** 트레이 변경 통지(block_defs는 전역 → 전 채널 브로드캐스트). */
+  /**
+   * 트레이 변경 통지(block_defs는 전역이나 owner_id 보유 → 해당 owner 채널만).
+   * ownerId 출처: CRUD 라우트·챗 도구=`getCurrentUserId()`(ALS), 러너=`control.ownerId`.
+   */
   emitBlockDef(
+    ownerId: string,
     action: "updated" | "deleted",
     blockDefId: string,
     blockDef?: BlockDef,
   ): void {
-    this.emitToAllPipelines({ type: "block_def", action, blockDefId, blockDef });
+    this.emitToOwner(ownerId, { type: "block_def", action, blockDefId, blockDef });
   }
 
   /**
-   * 문서 변경 통지(M4 결정 6·4-G). documents도 pipeline_id 없는 전역 테이블이므로
-   * 열려 있는 모든 pipeline 채널에 브로드캐스트(block_def 선례를 그대로 복제).
+   * 문서 변경 통지(M4 결정 6·4-G). documents도 pipeline_id 없는 전역이나 owner_id를
+   * 가지므로 해당 owner의 pipeline 채널에만 발행한다(auth.md §6).
    * 챗봇 edit_document·register_document, 사람 편집(문서 CRUD 라우트) 모두 이 함수를 호출한다.
+   * ownerId 출처: 챗 도구·CRUD 라우트=`getCurrentUserId()`(ALS), 러너=`control.ownerId`.
    */
   emitDocumentChanged(
+    ownerId: string,
     action: "created" | "updated" | "deleted",
     documentId: string,
     version?: number,
   ): void {
-    this.emitToAllPipelines({
+    this.emitToOwner(ownerId, {
       type: "document_changed",
       action,
       documentId,

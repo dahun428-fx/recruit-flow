@@ -86,8 +86,8 @@ export const PATCH = withUser(async (
   }
 
   const updated = await getBlockDef(id);
-  // 블록 정의 변경 → 열려 있는 모든 pipeline 채널에 브로드캐스트(engine.md §3).
-  if (updated) eventBus.emitBlockDef("updated", id, updated);
+  // 블록 정의 변경 → 해당 owner의 pipeline 채널에만 통지(auth.md §6).
+  if (updated) eventBus.emitBlockDef(getCurrentUserId(), "updated", id, updated);
   return NextResponse.json(updated);
 });
 
@@ -100,6 +100,6 @@ export const DELETE = withUser(async (
   if (!ok) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
-  eventBus.emitBlockDef("deleted", id);
+  eventBus.emitBlockDef(getCurrentUserId(), "deleted", id);
   return NextResponse.json({ ok: true });
 });
