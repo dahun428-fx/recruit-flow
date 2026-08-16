@@ -5,15 +5,16 @@
 import { getPipeline } from "@/lib/db/queries";
 import { eventBus } from "@/lib/engine/events";
 import type { SequencedSseEvent } from "@/lib/types";
+import { withUser } from "@/lib/auth/with-user";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(
+export const GET = withUser(async (
   _req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id: pipelineId } = await params;
+  ctx: { params: Promise<{ id: string }> },
+) => {
+  const { id: pipelineId } = await ctx.params;
 
   if (!(await getPipeline(pipelineId))) {
     return new Response("not found", { status: 404 });
@@ -78,4 +79,4 @@ export async function GET(
       Connection: "keep-alive",
     },
   });
-}
+});

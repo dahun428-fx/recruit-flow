@@ -2,13 +2,30 @@
 // body: { editedContent?: string } — 편집본이면 승인본에 반영(meta.editedBy=human).
 // 채팅 카드·사이드 패널 공용. 인메모리 대기 없으면 러너가 DB에서 재하이드레이션(§8-E).
 import { NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db/client";
+import { nodeRuns } from "@/lib/db/schema";
+import { getRun } from "@/lib/db/queries";
+import { getCurrentUserId } from "@/lib/auth/context";
 import { runner } from "@/lib/engine/runner";
+import { withUser } from "@/lib/auth/with-user";
 
-export async function POST(
+export const POST = withUser(async (
   req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
+  ctx: { params: Promise<{ id: string }> },
+) => {
+  const { id } = await ctx.params;
+
+  // node_run → run → 소유권 검증.
+  const nrRows = await db.select().from(nodeRuns).where(eq(nodeRuns.id, id)).limit(1);
+  if (!nrRows[0]) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+  const run = await getRun(nrRows[0].runId);
+  if (!run || run.ownerId !== getCurrentUserId()) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+
   let editedContent: string | undefined;
   try {
     const body = (await req.json()) as { editedContent?: string } | null;
@@ -24,4 +41,4 @@ export async function POST(
     return NextResponse.json({ error: result.error ?? "승인 실패" }, { status: 409 });
   }
   return NextResponse.json({ ok: true });
-}
+});

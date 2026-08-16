@@ -6,15 +6,16 @@ import { nanoid } from "nanoid";
 import { appendChatMessage, getPipeline, listChatMessages } from "@/lib/db/queries";
 import { eventBus } from "@/lib/engine/events";
 import { runChat } from "@/lib/engine/chat";
+import { withUser } from "@/lib/auth/with-user";
 
 // DB·엔진 싱글턴을 사용하므로 Node 런타임 강제.
 export const runtime = "nodejs";
 
-export async function POST(
+export const POST = withUser(async (
   req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id: pipelineId } = await params;
+  ctx: { params: Promise<{ id: string }> },
+) => {
+  const { id: pipelineId } = await ctx.params;
 
   if (!(await getPipeline(pipelineId))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
@@ -71,4 +72,4 @@ export async function POST(
 
   // 즉시 200 반환(fire-and-forget, 결정 C).
   return NextResponse.json({ ok: true });
-}
+});

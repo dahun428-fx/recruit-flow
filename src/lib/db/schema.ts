@@ -4,6 +4,8 @@
 // 재플랫폼 Phase 1(2026-08-16): sqlite-core → pg-core 방언 전환. 테이블·컬럼·
 // 관계 계약은 불변. folders.parentId·documents.folderId는 진짜 FK로 승격하되
 // 순환 검증은 앱 레벨 유지(schema.md 방언 델타).
+// Phase 2a Slice 1(2026-08-17): appUsers 테이블 + owner_id(nullable) 루트 5개 테이블.
+// NOT NULL 승격·RLS 정책은 Phase 2a Slice 4(0002 마이그레이션).
 
 import {
   type AnyPgColumn,
@@ -16,6 +18,15 @@ import {
 } from "drizzle-orm/pg-core";
 
 // ---------------------------------------------------------------------------
+// app_users — 최소 사용자 테이블 (Phase 2a). RLS·자기참조 정책은 Slice 4.
+// ---------------------------------------------------------------------------
+export const appUsers = pgTable("app_users", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+});
+
+// ---------------------------------------------------------------------------
 // pipelines
 // ---------------------------------------------------------------------------
 export const pipelines = pgTable("pipelines", {
@@ -25,6 +36,8 @@ export const pipelines = pgTable("pipelines", {
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
   // 앱 진입 시 "마지막 파이프라인" 결정
   lastOpenedAt: bigint("last_opened_at", { mode: "number" }),
+  // Phase 2a: 소유자(nullable — Slice 4에서 NOT NULL 승격). FK→app_users.id
+  ownerId: text("owner_id").references(() => appUsers.id),
 });
 
 // ---------------------------------------------------------------------------
@@ -86,6 +99,8 @@ export const blockDefs = pgTable("block_defs", {
   // true = 새 블록 트레이 대기(챗봇 add, 미승인). 캔버스 드래그 승인 시 false
   tray: boolean("tray").notNull().default(false),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  // Phase 2a: 소유자(nullable — Slice 4에서 NOT NULL 승격). FK→app_users.id
+  ownerId: text("owner_id").references(() => appUsers.id),
 });
 
 // ---------------------------------------------------------------------------
@@ -107,6 +122,9 @@ export const runs = pgTable("runs", {
   label: text("label"),
   startedAt: bigint("started_at", { mode: "number" }).notNull(),
   endedAt: bigint("ended_at", { mode: "number" }),
+  // Phase 2a: 소유자(nullable — Slice 4에서 NOT NULL 승격). FK→app_users.id
+  // 러너가 요청 밖에서 행을 쓰므로 자체 owner_id 보유(auth.md §3·5).
+  ownerId: text("owner_id").references(() => appUsers.id),
 });
 
 // ---------------------------------------------------------------------------
@@ -158,6 +176,8 @@ export const folders = pgTable("folders", {
   // 상위 폴더(null=루트 직속). 진짜 FK지만 순환 검증은 앱 레벨.
   parentId: text("parent_id").references((): AnyPgColumn => folders.id),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  // Phase 2a: 소유자(nullable — Slice 4에서 NOT NULL 승격). FK→app_users.id
+  ownerId: text("owner_id").references(() => appUsers.id),
 });
 
 // ---------------------------------------------------------------------------
@@ -173,6 +193,8 @@ export const documents = pgTable("documents", {
   // M5(v2→현행): 소속 폴더(null=루트). 진짜 FK, 앱 레벨 강제.
   folderId: text("folder_id").references(() => folders.id),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  // Phase 2a: 소유자(nullable — Slice 4에서 NOT NULL 승격). FK→app_users.id
+  ownerId: text("owner_id").references(() => appUsers.id),
 });
 
 export const documentVersions = pgTable("document_versions", {

@@ -2,12 +2,13 @@
 import { NextResponse } from "next/server";
 import { getPipeline, listChatMessages } from "@/lib/db/queries";
 import { eventBus } from "@/lib/engine/events";
+import { withUser } from "@/lib/auth/with-user";
 
-export async function GET(
+export const GET = withUser(async (
   _req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
+  ctx: { params: Promise<{ id: string }> },
+) => {
+  const { id } = await ctx.params;
   if (!(await getPipeline(id))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
@@ -15,4 +16,4 @@ export async function GET(
   return NextResponse.json(await listChatMessages(id), {
     headers: { "X-Stream-Cursor": String(cursor) },
   });
-}
+});

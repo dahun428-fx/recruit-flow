@@ -4,24 +4,25 @@
 // DELETE /api/documents/[id]                    → { ok: true } | 404
 import { NextResponse } from "next/server";
 import { addDocumentVersion, deleteDocument, getDocument, moveDocument } from "@/lib/db/queries";
+import { withUser } from "@/lib/auth/with-user";
 
-export async function GET(
+export const GET = withUser(async (
   _req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
+  ctx: { params: Promise<{ id: string }> },
+) => {
+  const { id } = await ctx.params;
   const doc = await getDocument(id);
   if (!doc) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   return NextResponse.json(doc);
-}
+});
 
-export async function PUT(
+export const PUT = withUser(async (
   req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
+  ctx: { params: Promise<{ id: string }> },
+) => {
+  const { id } = await ctx.params;
   const body = (await req.json().catch(() => ({}))) as {
     content?: string;
     note?: string;
@@ -37,13 +38,13 @@ export async function PUT(
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   return NextResponse.json(doc);
-}
+});
 
-export async function PATCH(
+export const PATCH = withUser(async (
   req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
+  ctx: { params: Promise<{ id: string }> },
+) => {
+  const { id } = await ctx.params;
   const body = (await req.json().catch(() => ({}))) as {
     folderId?: string | null;
   };
@@ -67,13 +68,13 @@ export async function PATCH(
     );
   }
   return NextResponse.json({ ok: true });
-}
+});
 
-export async function DELETE(
+export const DELETE = withUser(async (
   _req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
+  ctx: { params: Promise<{ id: string }> },
+) => {
+  const { id } = await ctx.params;
   const ok = await deleteDocument(id);
   if (!ok) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
@@ -82,4 +83,4 @@ export async function DELETE(
   // Input 노드가 config.documentId로 이 문서를 참조 중이었다면
   // 실행 시점에 "문서 없음"으로 실패(JSON 필드라 DB 제약 없음).
   return NextResponse.json({ ok: true });
-}
+});

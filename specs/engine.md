@@ -7,6 +7,16 @@
 M4 재설계(2026-08-15): 참조 resolve 스냅샷(결정 1), 장착 칩(결정 3),
 enabled 제거(결정 5), 챗봇 edit_document(결정 6), document_changed SSE 이벤트 반영.
 
+> **재플랫폼 Phase 2a — 러너 owner 경계 + SSE 스코프(2026-08-16, [auth.md](auth.md))**:
+> ① 러너: `runner.start/startFrom`이 요청 컨텍스트에서 `getCurrentUserId()`로
+> ownerId를 잡아 `RunControl.ownerId`에 저장하고 `createRun`이 각인.
+> `launch()`가 `runWithUser(control.ownerId, () => drive(control))`로 감싸
+> 백그라운드 쓰기도 owner 컨텍스트(예약 커넥션 GUC)를 받는다 — **BYPASSRLS
+> 시스템 롤 금지(R3)**. `recoverOnBoot`는 run별 owner로 `runWithUser` 감쌈.
+> ② SSE: `emitToAllPipelines`(전역 브로드캐스트) → **`emitToOwner(ownerId, ev)`**
+> 로 축소. `subscribePipeline`은 ownerId를 연결하고 `emitBlockDef`·
+> `emitDocumentChanged`가 ownerId를 넘긴다. 남의 문서/블록 변경이 새지 않는다.
+
 ## 1. 러너
 
 Next 서버 프로세스 내 싱글턴, 인메모리 큐 + 이벤트 구동 루프(결정 8).

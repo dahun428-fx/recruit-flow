@@ -2,6 +2,9 @@
 // PATCH  /api/block-defs/[id]  { tray?, name?, config? } → BlockDef
 // DELETE /api/block-defs/[id]                          → { ok }
 import { NextResponse } from "next/server";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/lib/db/client";
+import { blockDefs } from "@/lib/db/schema";
 import {
   deleteBlockDef,
   getBlockDef,
@@ -9,27 +12,39 @@ import {
   setBlockDefTray,
   updateBlockDefConfig,
 } from "@/lib/db/queries";
+import { getCurrentUserId } from "@/lib/auth/context";
 import { eventBus } from "@/lib/engine/events";
 import type { NodeConfig } from "@/lib/types";
+import { withUser } from "@/lib/auth/with-user";
 
-export async function GET(
+export const GET = withUser(async (
   _req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
-  const def = await getBlockDef(id);
-  if (!def) {
+  ctx: { params: Promise<{ id: string }> },
+) => {
+  const { id } = await ctx.params;
+  // getBlockDef는 러너 공유라 owner-agnostic; 라우트에서 직접 소유권 검증.
+  const rows = await db.select({ id: blockDefs.id })
+    .from(blockDefs)
+    .where(and(eq(blockDefs.id, id), eq(blockDefs.ownerId, getCurrentUserId())))
+    .limit(1);
+  if (!rows[0]) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
+  const def = await getBlockDef(id);
   return NextResponse.json(def);
-}
+});
 
-export async function PATCH(
+export const PATCH = withUser(async (
   req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
-  if (!(await getBlockDef(id))) {
+  ctx: { params: Promise<{ id: string }> },
+) => {
+  const { id } = await ctx.params;
+  // 소유권 확인 — getBlockDef는 러너 공유라 owner-agnostic; 라우트에서 직접 검증.
+  const rows = await db.select({ id: blockDefs.id })
+    .from(blockDefs)
+    .where(and(eq(blockDefs.id, id), eq(blockDefs.ownerId, getCurrentUserId())))
+    .limit(1);
+  if (!rows[0]) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   const body = (await req.json().catch(() => ({}))) as {
@@ -75,17 +90,17 @@ export async function PATCH(
   // 블록 정의 변경 → 열려 있는 모든 pipeline 채널에 브로드캐스트(engine.md §3).
   if (updated) eventBus.emitBlockDef("updated", id, updated);
   return NextResponse.json(updated);
-}
+});
 
-export async function DELETE(
+export const DELETE = withUser(async (
   _req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
+  ctx: { params: Promise<{ id: string }> },
+) => {
+  const { id } = await ctx.params;
   const ok = await deleteBlockDef(id);
   if (!ok) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   eventBus.emitBlockDef("deleted", id);
   return NextResponse.json({ ok: true });
-}
+});

@@ -260,6 +260,8 @@ export interface Run {
   label: string | null;
   startedAt: number;
   endedAt: number | null;
+  /** Phase 2a: 소유자 id(nullable — Slice 4에서 NOT NULL 승격). 라우트 소유권 검증에 사용. */
+  ownerId: string | null;
 }
 
 export interface NodeRun {

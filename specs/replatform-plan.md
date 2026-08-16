@@ -32,7 +32,17 @@ run에 owner_id 각인(러너 service_role 쓰기 격리 R3). run active 1개 �
 ## Phase 분해 (각 독립 롤백 가능)
 - **Phase 0**: 스펙 결정 ✅ + 스펙 델타(결정 2·8, 신규 결정 13, schema.md·engine.md, 신규 auth.md, CLAUDE.md Node22 절 삭제).
 - **Phase 1 (최저위험 착수)**: 데이터 레이어 — schema.ts pg-core, client.ts postgres.js, 트랜잭션 async, deps 교체(better-sqlite3 제거), drizzle-kit pg, pg 0000, **ETL 스크립트**. owner_id·auth 없음(순수 방언 전환). 로컬 pg(docker) 검증: 타입체크+기존 e2e/스모크 그린. 되돌리기 쉬움.
-- **Phase 2**: Auth(Supabase) + owner_id + RLS + 앱필터 + 러너 service_role 경계 + 시드 복제 + SSE 소유자 스코프. 2계정 상호 불가시성 검증.
+- **Phase 2 (분할)** — 상세 설계·계약: [auth.md](auth.md).
+  - **Phase 2a (로컬 우선, 착수)**: owner_id + pg 네이티브 RLS(`rf_app` FORCE) +
+    앱필터 + 현재유저 seam(AsyncLocalStorage, `resolveUserId`가 유일 스왑 지점) +
+    러너 owner 경계(R3) + SSE owner 스코프 + 시드 복제 헬퍼. 인증 UI 없음
+    (`x-rf-user` 헤더/`DEV_OWNER_ID` 폴백). 2계정 격리 로컬 검증.
+    > ★ 게이트 실험(2026-08-16) 확정: RLS current-user GUC는 **트랜잭션 스코프
+    > `SET LOCAL` 또는 예약 커넥션+명시 RESET**만 안전. bare 세션 `set_config`는
+    > 풀 커넥션 재사용 시 다음 요청으로 **누수**(실험 C/D). 예약 커넥션을 ALS에
+    > 담고 finally에서 RESET하는 방식으로 러너 백그라운드 쓰기까지 격리.
+  - **Phase 2b (연기)**: Supabase GoTrue/JWT/로그인 UI. `resolveUserId` 몸통 +
+    `provisionSeedForUser` 웹훅만 교체하면 2a 위에 얹힌다.
 - **Phase 3**: 배포(지속 Node 호스트, Dockerfile·env·DATABASE_URL) + recoverOnBoot 재시작 실증.
 - **Phase 4**: BYO 키 — user_settings 암호화 저장, sdk.ts/chat.ts 키 주입, 러너 키 확보(스냅샷·로그·SSE 유출 금지 R4), 설정 UI. code-reviewer 보안 게이트.
 - **Phase 5**: (연기) Realtime — 스케일아웃 실제 필요 시.

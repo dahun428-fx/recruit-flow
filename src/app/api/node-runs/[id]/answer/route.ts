@@ -2,13 +2,30 @@
 // body: { answer: string } — 대기 중인 ask_human tool 결과로 전달해 SDK 재개.
 // 프로세스 재시작으로 세션이 죽었으면 node_run failed 마감(§8-E 타협).
 import { NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db/client";
+import { nodeRuns } from "@/lib/db/schema";
+import { getRun } from "@/lib/db/queries";
+import { getCurrentUserId } from "@/lib/auth/context";
 import { runner } from "@/lib/engine/runner";
+import { withUser } from "@/lib/auth/with-user";
 
-export async function POST(
+export const POST = withUser(async (
   req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
+  ctx: { params: Promise<{ id: string }> },
+) => {
+  const { id } = await ctx.params;
+
+  // node_run → run → 소유권 검증.
+  const nrRows = await db.select().from(nodeRuns).where(eq(nodeRuns.id, id)).limit(1);
+  if (!nrRows[0]) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+  const run = await getRun(nrRows[0].runId);
+  if (!run || run.ownerId !== getCurrentUserId()) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+
   let answer = "";
   try {
     const body = (await req.json()) as { answer?: string } | null;
@@ -25,4 +42,4 @@ export async function POST(
     return NextResponse.json({ error: result.error ?? "답변 처리 실패" }, { status: 409 });
   }
   return NextResponse.json({ ok: true });
-}
+});

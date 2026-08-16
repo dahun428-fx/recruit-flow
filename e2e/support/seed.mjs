@@ -8,10 +8,13 @@ export async function seed(sql) {
   const now = Date.now();
   const id = () => randomUUID();
 
+  // Phase 2a Slice 1: 마이그레이션이 app_users에 usr_dev_default를 삽입하므로
+  // 시드 단계에서는 별도 삽입 불필요. documents·block_defs에 owner_id만 세팅.
+
   // 증거 문서 1개(문서 탭·Input 노드 테스트용).
   const docId = id();
-  await sql`INSERT INTO documents (id, name, current_version, created_at)
-    VALUES (${docId}, '샘플 증거', 1, ${now})`;
+  await sql`INSERT INTO documents (id, name, current_version, created_at, owner_id)
+    VALUES (${docId}, '샘플 증거', 1, ${now}, 'usr_dev_default')`;
   await sql`INSERT INTO document_versions (id, document_id, version, content, author, note, created_at)
     VALUES (${id()}, ${docId}, 1,
       ${"# 증거\n- 결제 시스템 재설계, p99 1.2s→180ms\n- 팀 리드 5명"},
@@ -23,8 +26,8 @@ export async function seed(sql) {
     role: "[E2E:writer] 이력서를 작성한다.",
     outputFormat: "markdown",
   });
-  await sql`INSERT INTO block_defs (id, type, name, description, config, enabled, origin, tray, created_at)
+  await sql`INSERT INTO block_defs (id, type, name, description, config, enabled, origin, tray, created_at, owner_id)
     VALUES (${id()}, 'agent', 'E2E 작성자', '고정 markdown 출력(스텁)',
       ${bdConfig}::jsonb,
-      ${true}, 'import', ${false}, ${now})`;
+      ${true}, 'import', ${false}, ${now}, 'usr_dev_default')`;
 }

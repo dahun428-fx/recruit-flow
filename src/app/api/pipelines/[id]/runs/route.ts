@@ -4,23 +4,24 @@
 import { NextResponse } from "next/server";
 import { getActiveRun, getPipeline, listRuns } from "@/lib/db/queries";
 import { runner } from "@/lib/engine/runner";
+import { withUser } from "@/lib/auth/with-user";
 
-export async function GET(
+export const GET = withUser(async (
   _req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
+  ctx: { params: Promise<{ id: string }> },
+) => {
+  const { id } = await ctx.params;
   if (!(await getPipeline(id))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   return NextResponse.json(await listRuns(id));
-}
+});
 
-export async function POST(
+export const POST = withUser(async (
   req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
+  ctx: { params: Promise<{ id: string }> },
+) => {
+  const { id } = await ctx.params;
   if (!(await getPipeline(id))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
@@ -61,4 +62,4 @@ export async function POST(
     return NextResponse.json(result, { status: 400 });
   }
   return NextResponse.json(result, { status: 201 });
-}
+});

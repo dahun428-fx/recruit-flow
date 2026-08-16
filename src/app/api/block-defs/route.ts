@@ -8,12 +8,13 @@ import { NextResponse } from "next/server";
 import { createBlockDef, listBlockDefs } from "@/lib/db/queries";
 import { eventBus } from "@/lib/engine/events";
 import type { NodeConfig, NodeType } from "@/lib/types";
+import { withUser } from "@/lib/auth/with-user";
 
-export async function GET() {
+export const GET = withUser(async () => {
   return NextResponse.json(await listBlockDefs());
-}
+});
 
-export async function POST(req: Request) {
+export const POST = withUser(async (req: Request) => {
   const body = (await req.json().catch(() => null)) as {
     type?: NodeType;
     name?: string;
@@ -44,4 +45,4 @@ export async function POST(req: Request) {
   // 트레이는 전역 → 열려 있는 모든 pipeline 채널에 통지(engine.md §3).
   eventBus.emitBlockDef("updated", created.id, created);
   return NextResponse.json(created, { status: 201 });
-}
+});

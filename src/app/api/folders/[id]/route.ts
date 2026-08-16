@@ -5,23 +5,26 @@
 //   name     — 폴더 이름 변경
 //   parentId — 상위 폴더 이동(null=루트로). 순환 이동 또는 대상 없음은 400.
 //   둘 다 한 요청에 제공 시 name 먼저 처리 후 이동.
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db/client";
 import { deleteFolder, moveFolder, renameFolder } from "@/lib/db/queries";
 import { folders } from "@/lib/db/schema";
 import type { Folder } from "@/lib/types";
+import { withUser } from "@/lib/auth/with-user";
+import { getCurrentUserId } from "@/lib/auth/context";
 
+// 소유자 확인 포함 — 라우트 오류 경로(404/400 구분)에서 사용.
 async function getFolder(id: string): Promise<Folder | null> {
-  const row = (await db.select().from(folders).where(eq(folders.id, id)).limit(1))[0];
+  const row = (await db.select().from(folders).where(and(eq(folders.id, id), eq(folders.ownerId, getCurrentUserId()))).limit(1))[0];
   return row ? { id: row.id, name: row.name, parentId: row.parentId ?? null, createdAt: row.createdAt } : null;
 }
 
-export async function PATCH(
+export const PATCH = withUser(async (
   req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
+  ctx: { params: Promise<{ id: string }> },
+) => {
+  const { id } = await ctx.params;
   const body = (await req.json().catch(() => ({}))) as {
     name?: string;
     parentId?: string | null;
@@ -69,16 +72,16 @@ export async function PATCH(
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   return NextResponse.json(result);
-}
+});
 
-export async function DELETE(
+export const DELETE = withUser(async (
   _req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
+  ctx: { params: Promise<{ id: string }> },
+) => {
+  const { id } = await ctx.params;
   const ok = await deleteFolder(id);
   if (!ok) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   return NextResponse.json({ ok: true });
-}
+});

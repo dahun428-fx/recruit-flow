@@ -18,6 +18,16 @@ M4 재설계(2026-08-15): 참조+오버라이드 시맨틱(결정 1), 장착 칩
 > SQLite 마이그레이션 0000~0004는 아카이브, pg는 백지 0000으로 재시작.
 > 소유권(owner_id)·인증·RLS는 Phase 2 — 이 Phase는 순수 방언 전환이다.
 
+> **재플랫폼 Phase 2a — 멀티유저 소유권(2026-08-16, [auth.md](auth.md))**:
+> 루트 테이블 `pipelines·documents·folders·block_defs`와 `runs`에
+> **`owner_id text NOT NULL`**(→`app_users.id`) 추가. 나머지 자식 테이블은
+> owner_id 없이 부모 FK로 소유 상속(RLS 조인 정책). 신규 최소 테이블
+> **`app_users(id text PK, email text, created_at bigint)`**. R5 부분 유니크:
+> `one_active_run_per_pipeline ON runs(pipeline_id) WHERE status IN
+> ('running','waiting_human')`. 마이그레이션 0001(구조·백필 `DEV_OWNER_ID`,
+> owner_id **nullable**) / 0002(NOT NULL 승격 + RLS 정책·롤). NOT NULL을 0001에
+> 걸면 각인 이전 앱 INSERT가 깨지므로 연기. 격리·RLS 계약 전문은 auth.md.
+
 ## 설계 원칙 (Q16, M4 갱신)
 
 1. **현재 그래프 = 정규화 행** (`nodes`/`edges`) — 팔레트·부분

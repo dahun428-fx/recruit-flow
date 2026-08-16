@@ -2,20 +2,23 @@
 // SSE는 통지 — 클라이언트는 접속 시 REST(GET /api/runs/[id])로 상태를 읽고 구독한다.
 // 이벤트 이름 = payload.type (run_status/node_status/artifact_delta).
 import { getRun } from "@/lib/db/queries";
+import { getCurrentUserId } from "@/lib/auth/context";
 import { eventBus } from "@/lib/engine/events";
 import type { SequencedSseEvent } from "@/lib/types";
+import { withUser } from "@/lib/auth/with-user";
 
 // DB·러너 싱글턴을 쓰므로 Node 런타임 강제(엣지 아님).
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(
+export const GET = withUser(async (
   _req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
+  ctx: { params: Promise<{ id: string }> },
+) => {
+  const { id } = await ctx.params;
+  // getRun은 owner-agnostic(group B) — 라우트에서 직접 소유권 검증(createRun이 항상 각인).
   const run = await getRun(id);
-  if (!run) {
+  if (!run || run.ownerId !== getCurrentUserId()) {
     return new Response("not found", { status: 404 });
   }
 
@@ -80,4 +83,4 @@ export async function GET(
       Connection: "keep-alive",
     },
   });
-}
+});

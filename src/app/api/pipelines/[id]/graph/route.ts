@@ -4,23 +4,24 @@ import { NextResponse } from "next/server";
 import { getGraph, getPipeline, saveGraph } from "@/lib/db/queries";
 import { validateGraphPayload } from "@/lib/validation";
 import type { EdgeRow, NodeRow } from "@/lib/types";
+import { withUser } from "@/lib/auth/with-user";
 
-export async function GET(
+export const GET = withUser(async (
   _req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
+  ctx: { params: Promise<{ id: string }> },
+) => {
+  const { id } = await ctx.params;
   if (!(await getPipeline(id))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   return NextResponse.json(await getGraph(id));
-}
+});
 
-export async function PUT(
+export const PUT = withUser(async (
   req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
+  ctx: { params: Promise<{ id: string }> },
+) => {
+  const { id } = await ctx.params;
   if (!(await getPipeline(id))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
@@ -44,4 +45,4 @@ export async function PUT(
   }
   await saveGraph(id, { nodes: body.nodes, edges: body.edges });
   return NextResponse.json({ ok: true });
-}
+});

@@ -2,14 +2,15 @@
 // 문서 탭 버전 히스토리(ui.md §문서 탭). document_versions가 진실.
 import { NextResponse } from "next/server";
 import { getDocument, listDocumentVersions } from "@/lib/db/queries";
+import { withUser } from "@/lib/auth/with-user";
 
-export async function GET(
+export const GET = withUser(async (
   _req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params;
+  ctx: { params: Promise<{ id: string }> },
+) => {
+  const { id } = await ctx.params;
   if (!(await getDocument(id))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   return NextResponse.json(await listDocumentVersions(id));
-}
+});
