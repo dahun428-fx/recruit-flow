@@ -2,7 +2,7 @@
 // 문서 CRUD + 버전 저장(PUT = 새 버전, author=human). M1에서 JD·증거 입력 수단.
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { usePanelSize } from "@/hooks/usePanelWidth";
 import { Resizer } from "@/components/shell/Resizer";
@@ -17,6 +17,10 @@ export function DocumentsView() {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
+  // 인라인 새 문서 이름 입력
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const newNameInputRef = useRef<HTMLInputElement>(null);
 
   const list = usePanelSize("doclist", {
     initial: 230,
@@ -57,12 +61,36 @@ export function DocumentsView() {
     });
   }, [selected]);
 
-  async function createNew() {
-    const name = window.prompt("새 문서 이름 (예: jd-kakao-2026.md)");
-    if (!name) return;
-    const doc = await api.createDocument(name.trim(), "", "새 문서");
-    await loadList();
-    setSelected(doc.id);
+  function startCreating() {
+    setCreating(true);
+    setNewName("새 문서.md");
+    setTimeout(() => {
+      newNameInputRef.current?.focus();
+      newNameInputRef.current?.select();
+    }, 0);
+  }
+
+  async function commitCreate() {
+    const trimmed = newName.trim();
+    if (!trimmed) {
+      setCreating(false);
+      setNewName("");
+      return;
+    }
+    setCreating(false);
+    setNewName("");
+    try {
+      const doc = await api.createDocument(trimmed, "", "새 문서");
+      await loadList();
+      setSelected(doc.id);
+    } catch {
+      // 무시
+    }
+  }
+
+  function cancelCreate() {
+    setCreating(false);
+    setNewName("");
   }
 
   async function saveVersion() {
@@ -94,7 +122,34 @@ export function DocumentsView() {
             {d.name}
           </div>
         ))}
-        <div className={styles.itemNew} onClick={createNew}>
+        {/* 인라인 새 문서 이름 입력 행 */}
+        {creating && (
+          <div className={styles.item}>
+            <input
+              ref={newNameInputRef}
+              style={{
+                border: "1px solid var(--c-agent)",
+                borderRadius: 4,
+                padding: "2px 6px",
+                font: "inherit",
+                fontSize: 12,
+                width: "100%",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { void commitCreate(); }
+                if (e.key === "Escape") { cancelCreate(); }
+                e.stopPropagation();
+              }}
+              onBlur={() => void commitCreate()}
+              placeholder="문서 이름 (예: jd-kakao.md)"
+            />
+          </div>
+        )}
+        <div className={styles.itemNew} onClick={startCreating}>
           + 새 문서
         </div>
       </div>

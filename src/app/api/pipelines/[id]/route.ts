@@ -1,7 +1,20 @@
+// GET    /api/pipelines/[id]  → Pipeline | 404
 // PATCH  /api/pipelines/[id]  { name?, lastOpenedAt? } → Pipeline
 // DELETE /api/pipelines/[id]  → { ok }
 import { NextResponse } from "next/server";
-import { deletePipeline, updatePipeline } from "@/lib/db/queries";
+import { deletePipeline, getPipeline, updatePipeline } from "@/lib/db/queries";
+
+export async function GET(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  const pipeline = getPipeline(id);
+  if (!pipeline) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+  return NextResponse.json(pipeline);
+}
 
 export async function PATCH(
   req: Request,

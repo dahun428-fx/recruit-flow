@@ -915,6 +915,24 @@ export function TabEditor({
     return () => window.removeEventListener("rf:activateCanvasTab", onActivateCanvas);
   }, []);
 
+  // 문서 삭제 이벤트 → 해당 탭 닫기 (FileExplorer가 발행).
+  useEffect(() => {
+    function onDocDeleted(e: Event) {
+      const { docId } = (e as CustomEvent<{ docId: string }>).detail;
+      const tabToClose = `doc:${docId}`;
+      setTabs((prev) => prev.filter((t) => {
+        if (t.kind === "document") return t.docId !== docId;
+        return true;
+      }));
+      setActiveId((cur) => {
+        if (cur !== tabToClose) return cur;
+        return "canvas";
+      });
+    }
+    window.addEventListener("rf:documentDeleted", onDocDeleted);
+    return () => window.removeEventListener("rf:documentDeleted", onDocDeleted);
+  }, []);
+
   // 문서 탭 열기 요청 처리
   useEffect(() => {
     if (!openDocumentRequest) return;

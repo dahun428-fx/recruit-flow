@@ -128,6 +128,7 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
 
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [partialRunning, setPartialRunning] = useState(false);
+  const [partialError, setPartialError] = useState<string | null>(null);
 
   // M4: blockDef 캐시(장착 칩 라벨용 + 참조 노드 config resolve용).
   const [blockDefMap, setBlockDefMap] = useState<Record<string, { name: string; type: string }>>({});
@@ -449,7 +450,8 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({})) as { error?: string };
-        alert(err.error ?? "부분 재실행 실패");
+        setPartialError(err.error ?? "부분 재실행 실패");
+        setTimeout(() => setPartialError(null), 4000);
       }
     } finally {
       setPartialRunning(false);
@@ -467,6 +469,18 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
       {readOnly && (
         <div className={styles.snapshotHint}>
           과거 run 스냅샷 — 읽기 전용
+        </div>
+      )}
+      {partialError && (
+        <div className={styles.partialErrorBanner}>
+          {partialError}
+          <button
+            className={styles.partialErrorClose}
+            onClick={() => setPartialError(null)}
+            aria-label="닫기"
+          >
+            ×
+          </button>
         </div>
       )}
       <ReactFlow

@@ -301,6 +301,17 @@ export function addDocumentVersion(
   return getDocument(documentId);
 }
 
+/**
+ * 문서 삭제. document_versions는 FK onDelete:"cascade"로 함께 삭제된다.
+ * Input 노드 config.documentId 참조(JSON 필드)는 DB 제약 밖이므로
+ * 삭제를 막지 않는다 — 해당 노드는 실행 시점에 "문서 없음"으로 실패한다.
+ * 존재하지 않는 id면 false 반환.
+ */
+export function deleteDocument(id: string): boolean {
+  const res = db.delete(documents).where(eq(documents.id, id)).run();
+  return res.changes > 0;
+}
+
 export function listDocumentVersions(documentId: string): DocumentVersion[] {
   return db
     .select()

@@ -81,9 +81,8 @@ export function TopBar() {
 
   async function createNew() {
     setMenuOpen(false);
-    const name = window.prompt("새 파이프라인 이름", "새 파이프라인");
-    if (!name) return;
-    const p = await api.createPipeline(name.trim() || "새 파이프라인");
+    // 기본명으로 즉시 생성 — 파일탐색기 프로젝트 트리에서 이름 변경 가능
+    const p = await api.createPipeline("새 파이프라인");
     setPipelines((prev) => [p, ...prev]);
     router.push(`/pipelines/${p.id}`);
   }

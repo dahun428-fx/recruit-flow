@@ -93,6 +93,9 @@ export const api = {
       body: JSON.stringify(params),
     }).then((r) => json<BlockDef>(r)),
 
+  getPipeline: (id: string) =>
+    fetch(`/api/pipelines/${id}`).then((r) => json<Pipeline>(r)),
+
   listDocuments: () =>
     fetch("/api/documents").then((r) => json<Document[]>(r)),
   createDocument: (name: string, content: string, note?: string) =>
@@ -109,4 +112,8 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content, note }),
     }).then((r) => json<DocumentDetail>(r)),
+  deleteDocument: (id: string) =>
+    fetch(`/api/documents/${id}`, { method: "DELETE" }).then((r) =>
+      json<{ ok: boolean }>(r),
+    ),
 };

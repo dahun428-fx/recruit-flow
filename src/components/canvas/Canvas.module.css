@@ -42,6 +42,46 @@
   pointer-events: none;
 }
 
+/* 부분 재실행 에러 배너 (alert 대체 — 자동 소멸) */
+.partialErrorBanner {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff3f3;
+  border: 1px solid #f0a0a0;
+  border-radius: 7px;
+  padding: 6px 10px 6px 14px;
+  font-size: 12px;
+  color: #b82020;
+  z-index: 20;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  animation: partialErrorIn 0.15s ease;
+}
+
+@keyframes partialErrorIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(-4px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.partialErrorClose {
+  border: 0;
+  background: transparent;
+  color: #b82020;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  opacity: 0.7;
+}
+.partialErrorClose:hover {
+  opacity: 1;
+}
+
 /* 우클릭 컨텍스트 메뉴 */
 .contextMenu {
   position: fixed;

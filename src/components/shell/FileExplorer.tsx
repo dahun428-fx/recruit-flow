@@ -48,6 +48,9 @@ const TYPE_ORDER = [
 
 const MOUNT_TYPES = ["skill", "rule", "tool"];
 
+/** 아직 서버에 생성하지 않은 "대기 중" 문서 행의 가짜 ID */
+const NEW_DOC_SENTINEL = "__new_doc__";
+
 /** 확인 팝업 state. */
 interface ConfirmState {
   message: string;
@@ -57,7 +60,7 @@ interface ConfirmState {
 }
 
 /** 컨텍스트 메뉴 state. */
-type ContextSection = "empty" | "library" | "tray" | "typeFolder" | "blockRoot" | "docFolder" | "projectFolder";
+type ContextSection = "empty" | "library" | "tray" | "typeFolder" | "blockRoot" | "docFolder" | "docItem" | "projectFolder";
 interface ContextMenuState {
   section: ContextSection;
   x: number;
@@ -67,6 +70,7 @@ interface ContextMenuState {
   type?: NodeType;
   blockDef?: BlockDef;
   trayDef?: BlockDef;
+  doc?: Document;
   /** blockRoot 서브메뉴 열림 여부 */
   createSubmenuOpen?: boolean;
 }
@@ -132,9 +136,14 @@ export function FileExplorer({
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   // 확인 팝업
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
-  // 인라인 이름 변경
+  // 인라인 이름 변경 (블록 정의)
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+
+  // 인라인 문서 이름 입력 (신규 문서 생성 후 이름 편집)
+  const [newDocId, setNewDocId] = useState<string | null>(null);
+  const [newDocName, setNewDocName] = useState("");
+  const newDocInputRef = useRef<HTMLInputElement>(null);
 
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -258,11 +267,14 @@ export function FileExplorer({
           setRenamingId(null);
           setRenameValue("");
         }
+        if (newDocId) {
+          cancelNewDoc();
+        }
       }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [renamingId]);
+  }, [renamingId, newDocId]);
 
   // 이름 변경 input에 포커스
   useEffect(() => {
@@ -271,6 +283,14 @@ export function FileExplorer({
       renameInputRef.current.select();
     }
   }, [renamingId]);
+
+  // 새 문서 이름 input에 포커스 (sentinel이 세팅될 때)
+  useEffect(() => {
+    if (newDocId === NEW_DOC_SENTINEL && newDocInputRef.current) {
+      newDocInputRef.current.focus();
+      newDocInputRef.current.select();
+    }
+  }, [newDocId]);
 
   const toggleType = (type: string) => {
     setCollapsedTypes((prev) => {
@@ -324,12 +344,32 @@ export function FileExplorer({
     [loadDocs],
   );
 
-  async function createNewDoc() {
-    const name = window.prompt("새 문서 이름 (예: jd-kakao-2026.md)");
-    if (!name) return;
-    const doc = await api.createDocument(name.trim(), "", "새 문서");
-    await loadDocs();
-    onOpenDocument(doc.id, doc.name);
+  function createNewDoc() {
+    // 문서 섹션 펼치기
+    setTopOpen((prev) => ({ ...prev, documents: true }));
+    // 인라인 입력 행 표시 (서버 생성 전)
+    setNewDocId(NEW_DOC_SENTINEL);
+    setNewDocName("새 문서.md");
+  }
+
+  async function commitNewDocName() {
+    const trimmed = newDocName.trim();
+    setNewDocId(null);
+    setNewDocName("");
+    // 빈 값 blur/Enter는 취소 — 유령 문서 생성 방지(DocumentsView.commitCreate와 동일 시맨틱).
+    if (!trimmed) return;
+    try {
+      const doc = await api.createDocument(trimmed, "", "새 문서");
+      await loadDocs();
+      onOpenDocument(doc.id, doc.name);
+    } catch {
+      // 무시
+    }
+  }
+
+  function cancelNewDoc() {
+    setNewDocId(null);
+    setNewDocName("");
   }
 
   // ── 이름 변경 ──────────────────────────────────────────────────
@@ -495,6 +535,26 @@ export function FileExplorer({
       onConfirm: () => {
         setBlockDefs((prev) => prev.filter((d) => d.id !== def.id));
         fetch(`/api/block-defs/${def.id}`, { method: "DELETE" }).catch(() => {});
+        setConfirm(null);
+      },
+      x: Math.min(x, window.innerWidth - 220),
+      y: Math.min(y, window.innerHeight - 100),
+    });
+  }
+
+  function menuDeleteDoc(doc: Document) {
+    const { x, y } = contextMenu ?? { x: 200, y: 200 };
+    setContextMenu(null);
+    setConfirm({
+      message: `"${doc.name}" 문서를 삭제할까요?`,
+      onConfirm: () => {
+        setDocs((prev) => prev.filter((d) => d.id !== doc.id));
+        // 낙관적 제거 — 실패 시 목록 재동기화로 롤백.
+        api.deleteDocument(doc.id).catch(() => void loadDocs());
+        // 열린 탭 닫기
+        window.dispatchEvent(
+          new CustomEvent("rf:documentDeleted", { detail: { docId: doc.id } }),
+        );
         setConfirm(null);
       },
       x: Math.min(x, window.innerWidth - 220),
@@ -1063,20 +1123,46 @@ export function FileExplorer({
           {topOpen.documents && (
             <div className={styles.treeChildren}>
               {filteredDocs.map((doc) => (
-                <button
+                <div
                   key={doc.id}
                   className={`${styles.docItem} ${styles.treeIndent1}`}
-                  onClick={() => onOpenDocument(doc.id, doc.name)}
                   data-testid={`document-list-item-${doc.id}`}
+                  onContextMenu={(e) =>
+                    openContextMenu(e, { section: "docItem", doc })
+                  }
+                  onClick={() => onOpenDocument(doc.id, doc.name)}
                 >
                   <span className={styles.treeFileIcon} style={{ fontSize: 11 }}>📄</span>
-                  {doc.name}
-                </button>
+                  <span
+                    style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  >
+                    {doc.name}
+                  </span>
+                </div>
               ))}
-              {filteredDocs.length === 0 && (
+              {/* 새 문서 이름 입력 행 (서버 생성 전 인라인 입력) */}
+              {newDocId === NEW_DOC_SENTINEL && (
+                <div className={`${styles.docItem} ${styles.treeIndent1}`}>
+                  <span className={styles.treeFileIcon} style={{ fontSize: 11 }}>📄</span>
+                  <input
+                    ref={newDocInputRef}
+                    className={styles.renameInput}
+                    value={newDocName}
+                    onChange={(e) => setNewDocName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { void commitNewDocName(); }
+                      if (e.key === "Escape") { cancelNewDoc(); }
+                      e.stopPropagation();
+                    }}
+                    onBlur={() => void commitNewDocName()}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </div>
+              )}
+              {filteredDocs.length === 0 && newDocId !== NEW_DOC_SENTINEL && (
                 <div className={`${styles.empty} ${styles.treeIndent1}`}>문서 없음</div>
               )}
-              <button className={`${styles.newDoc} ${styles.treeIndent1}`} onClick={() => void createNewDoc()}>
+              <button className={`${styles.newDoc} ${styles.treeIndent1}`} onClick={() => createNewDoc()}>
                 + 새 문서
               </button>
             </div>
@@ -1251,6 +1337,29 @@ export function FileExplorer({
                 }}
               >
                 새 문서
+              </button>
+            </>
+          )}
+
+          {/* 문서 항목 우클릭 메뉴 */}
+          {contextMenu.section === "docItem" && contextMenu.doc && (
+            <>
+              <button
+                className={styles.menuItem}
+                onClick={() => {
+                  onOpenDocument(contextMenu.doc!.id, contextMenu.doc!.name);
+                  setContextMenu(null);
+                }}
+              >
+                열기
+              </button>
+              <div className={styles.menuDivider} />
+              <button
+                className={`${styles.menuItem} ${styles.menuItemDanger}`}
+                data-testid={`ctx-delete-doc-${contextMenu.doc.id}`}
+                onClick={() => menuDeleteDoc(contextMenu.doc!)}
+              >
+                삭제
               </button>
             </>
           )}
