@@ -256,10 +256,10 @@ async function testDecision5() {
   const pl = createPipeline("smoke-chat-d5");
   const { allowedTools, mcpServers } = buildChatbotMcp(pl.id);
 
-  // allowedTools 정확히 8종.
-  check("allowedTools 정확히 8종", allowedTools.length === 8, `count=${allowedTools.length}: ${allowedTools.join(",")}`);
+  // allowedTools 정확히 9종(읽기 5 + 쓰기 4).
+  check("allowedTools 정확히 9종", allowedTools.length === 9, `count=${allowedTools.length}: ${allowedTools.join(",")}`);
   const expected = new Set(CHATBOT_TOOL_NAMES.map((n) => `mcp__${CHATBOT_MCP_SERVER_NAME}__${n}`));
-  check("allowedTools = 카탈로그 8종과 정확히 일치", allowedTools.length === expected.size && allowedTools.every((t) => expected.has(t)));
+  check("allowedTools = 카탈로그 9종과 정확히 일치", allowedTools.length === expected.size && allowedTools.every((t) => expected.has(t)));
 
   // 금지 tool 이름이 어디에도 없어야(allowedTools + 실제 MCP tool 목록).
   const forbidden = ["add_edge", "wire", "connect", "delete_node", "update_node", "move_node", "delete_edge", "delete", "update"];

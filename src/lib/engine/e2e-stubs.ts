@@ -108,6 +108,11 @@ async function chatStub(params: RunChatParams): Promise<RunChatResult> {
     return done("문서를 라이브러리에 등록했습니다.");
   }
 
+  if (/커버리지|매칭|적합|check.*coverage/i.test(t)) {
+    const r = await call("check_jd_coverage", {});
+    return done(`JD 커버리지를 확인했습니다.\n${r.content[0]?.text ?? ""}`);
+  }
+
   if (/작성해줘|실행|돌려줘|만들어줘 이력서/.test(t)) {
     const r = await call("trigger_run", {});
     return done(`실행을 시작했습니다. ${r.content[0]?.text ?? ""}`);

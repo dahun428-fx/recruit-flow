@@ -1,4 +1,4 @@
-// 챗봇 다회전 진입점(M3, E2+E4) — 사령탑 시스템 프롬프트 + tool 7종 MCP + 다회전 query().
+// 챗봇 다회전 진입점(M3, E2+E4) — 사령탑 시스템 프롬프트 + tool 9종 MCP + 다회전 query().
 // 파이프라인당 1 영속 스레드: 매 호출 시 chat_messages(user/assistant) 시간순 로드 →
 // user prompt에 대화 로그로 합성. tool 결과는 DB 상태에 반영되므로 read tool로 재조회
 // (별도 tool-result 히스토리 저장 불요, m3-plan §runChat).
@@ -34,7 +34,8 @@ export const CHATBOT_SYSTEM_PROMPT = `당신은 recruit-flow의 **사령탑 챗�
   해야 한다고 안내하라. 없는 능력을 있는 척하지 마라.
 
 ## 사용 가능한 도구
-- 읽기: list_block_defs, get_graph, list_documents, get_document
+- 읽기: list_block_defs, get_graph, list_documents, get_document,
+  check_jd_coverage(JD와 증거베이스를 대조해 요건 커버리지·직군 불일치를 요약)
 - 쓰기: add_block(트레이에 블록 추가), register_document(문서 등록/갱신),
   edit_document(기존 문서를 부분 치환으로 수정 — 전문 재작성 불필요), trigger_run(실행)
 
@@ -65,7 +66,8 @@ export const CHATBOT_SYSTEM_PROMPT = `당신은 recruit-flow의 **사령탑 챗�
    같은 이름이면 새 버전으로 갱신되고, JD 입력 노드가 이 문서를 참조하므로 **재배선 없이** 다음 실행이 새 JD를 쓴다.
 2. 이어서 사용자가 실행 의도를 보이면 trigger_run으로 실행한다.
 증거베이스는 고정이고 JD만 바뀐다는 전제로 안내하라. JD와 증거가 직군이 명백히 다르면(예: 백엔드 이력에 프론트엔드 JD)
-실행 전에 그 불일치를 짚어 준다.
+실행 전에 그 불일치를 짚어 준다. 불일치가 의심되면 trigger_run 전에 **check_jd_coverage**로 요건 커버리지를
+확인하고(누락 요건·커버리지 비율), 그 결과를 근거로 사용자에게 경고하라 — 이 tool은 읽기 전용이라 안전하다.
 
 ## 실행 의도
 사용자가 "작성해줘 / 실행해줘 / 돌려줘" 같은 실행 의도를 보이면 trigger_run을 호출한다.
@@ -84,7 +86,7 @@ export interface RunChatParams {
   userText: string;
   /** assistant 텍스트 델타 스트리밍(pipeline SSE 발행용). */
   onDelta?: (chunk: string) => void;
-  /** 테스트/커스텀 tool 주입(미지정 시 buildChatbotMcp 기본 7종). */
+  /** 테스트/커스텀 tool 주입(미지정 시 buildChatbotMcp 기본 9종). */
   tools?: { mcpServers: Record<string, McpServerConfig>; allowedTools: string[] };
 }
 

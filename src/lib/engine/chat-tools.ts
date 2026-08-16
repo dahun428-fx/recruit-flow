@@ -1,8 +1,8 @@
-// 챗봇 tool 7종(M3, 결정 5) — in-process MCP 서버. pipelineId를 클로저로 바인딩.
+// 챗봇 tool 9종(M3+M5, 결정 5) — in-process MCP 서버. pipelineId를 클로저로 바인딩.
 // 권한 = tool 집합으로 물리적 강제(m3-plan §핵심 구조): 배선/삭제/노드수정 tool은
 // **존재 자체를 만들지 않는다**. 챗봇이 그래프에 직접 손댈 방법이 없다.
 //
-// 읽기 4종: list_block_defs · get_graph(요약만, 결정 G) · list_documents · get_document.
+// 읽기 5종: list_block_defs · get_graph(요약만, 결정 G) · list_documents · get_document · check_jd_coverage(M5).
 // 쓰기 4종: add_block(항상 tray=true) · register_document · edit_document(부분 치환) · trigger_run.
 // **금지(미제공)**: add_edge/wire/connect/delete_node/update_node/move_node/delete_edge.
 
@@ -35,6 +35,7 @@ export const CHATBOT_TOOL_NAMES = [
   "get_graph",
   "list_documents",
   "get_document",
+  "check_jd_coverage",
   "add_block",
   "register_document",
   "edit_document",
@@ -150,8 +151,116 @@ function validateBlockConfig(
 
 const textResult = (text: string) => ({ content: [{ type: "text" as const, text }] });
 
+// ---- check_jd_coverage 결정론 매칭 헬퍼 ------------------------------------
+// LLM 판단 없이 순수 문자열 처리로 JD 요건을 뽑고 증거 본문과 대조한다.
+// 챗봇(LLM)이 이 결과를 받아 자연어로 경고/판단한다.
+
+/** JD 본문에서 요건성 라인을 추출. 자격요건/필수/우대/requirements 섹션의 불릿 우선,
+ *  없으면 문서 전체의 불릿·번호 목록을 요건으로 간주. */
+function extractRequirements(content: string): string[] {
+  const lines = content.split(/\r?\n/);
+  const reqSectionRe =
+    /(자격\s*요건|지원\s*자격|필수|필수\s*요건|우대|우대\s*사항|requirements?|qualifications?|responsibilities?)/i;
+  const headingRe = /^\s{0,3}(#{1,6}\s+|\*\*|[0-9]+[.)]\s*\*\*)?/; // 마크다운 헤딩 감지 보조
+  const bulletRe = /^\s*(?:[-*+•]|\d+[.)])\s+(.*\S)/;
+
+  const inSectionReqs: string[] = [];
+  const allBullets: string[] = [];
+  let inReqSection = false;
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    const isHeading = /^\s{0,3}#{1,6}\s+/.test(line) || /^\s*\*\*.+\*\*\s*:?\s*$/.test(line);
+    if (isHeading) {
+      inReqSection = reqSectionRe.test(line);
+      // 헤딩 자체는 요건 라인으로 넣지 않는다.
+      continue;
+    }
+    const m = bulletRe.exec(line);
+    if (m) {
+      const text = m[1].trim();
+      if (text) {
+        allBullets.push(text);
+        if (inReqSection) inSectionReqs.push(text);
+      }
+    }
+  }
+
+  let reqs = inSectionReqs.length > 0 ? inSectionReqs : allBullets;
+  if (reqs.length === 0) {
+    // 불릿이 전혀 없으면 핵심 토큰(길이 있는 명사구 후보)으로 대체.
+    reqs = extractCoreTokens(content).map((tok) => tok);
+  }
+  // 중복 제거(대소문자·공백 무시).
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const r of reqs) {
+    const key = normalize(r);
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      out.push(r);
+    }
+  }
+  // 폭주 방지: 상위 40개까지만.
+  return out.slice(0, 40);
+}
+
+/** 불릿이 없는 JD를 위한 폴백: 흔한 기술/직무 키워드성 토큰 추출(결정론). */
+function extractCoreTokens(content: string): string[] {
+  const words = content
+    .split(/[^0-9A-Za-z가-힣+.#/]+/)
+    .map((w) => w.trim())
+    .filter((w) => w.length >= 2);
+  const stop = new Set(STOPWORDS);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const w of words) {
+    const key = w.toLowerCase();
+    if (stop.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push(w);
+    if (out.length >= 20) break;
+  }
+  return out;
+}
+
+const STOPWORDS = [
+  "the", "and", "for", "with", "you", "your", "our", "are", "will", "have",
+  "및", "또는", "그리고", "등", "이상", "관련", "경험", "능력", "우대", "필수",
+  "대한", "있는", "있음", "합니다", "하는", "대해",
+];
+
+function normalize(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/** 요건 라인에서 매칭용 키워드(2자 이상 토큰)를 뽑는다. */
+function keywordsOf(req: string): string[] {
+  const toks = req
+    .split(/[^0-9A-Za-z가-힣+.#/]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2 && !STOPWORDS.includes(t.toLowerCase()));
+  // 중복 제거.
+  return Array.from(new Set(toks.map((t) => t)));
+}
+
+/** 요건이 증거 본문(정규화 텍스트)에 커버되는지 판정. 요건 키워드의 과반이
+ *  증거에 등장하면 커버로 본다(결정론). 키워드가 없으면 요건 전체 문자열로 판정. */
+function isCovered(req: string, evidenceNorm: string): boolean {
+  const kws = keywordsOf(req);
+  if (kws.length === 0) {
+    return evidenceNorm.includes(normalize(req));
+  }
+  let hit = 0;
+  for (const kw of kws) {
+    if (evidenceNorm.includes(kw.toLowerCase())) hit++;
+  }
+  // 과반(내림) 이상 등장 시 커버. 키워드 1개면 그 1개가 있어야 함.
+  return hit * 2 >= kws.length && hit > 0;
+}
+
 /**
- * 챗봇 tool 7종을 pipelineId·runIdRef 클로저로 바인딩한 in-process MCP 서버.
+ * 챗봇 tool 9종을 pipelineId·runIdRef 클로저로 바인딩한 in-process MCP 서버.
  * @param runIdRef trigger_run이 시작한 runId를 담을 참조(A/U가 card_run으로 읽음).
  */
 export function buildChatbotMcp(
@@ -234,6 +343,103 @@ export function buildChatbotMcp(
         const doc = getDocument(args.id);
         if (!doc) return textResult(`문서를 찾을 수 없습니다: ${args.id}`);
         return textResult(`# ${doc.name} (v${doc.currentVersion})\n\n${doc.content}`);
+      },
+    ),
+  );
+
+  tools.push(
+    tool(
+      "check_jd_coverage",
+      "JD와 증거베이스(경력·프로필 등 문서)를 **읽어** 필수 요건 커버리지를 결정론적으로 요약한다. " +
+        "JD 요건 목록·커버된 요건·누락 요건·대략적 커버리지 비율을 돌려주니, " +
+        "그 요약을 근거로 직군 불일치(예: 백엔드 이력에 프론트엔드 JD)를 '작성해줘' 전에 사용자에게 경고하라. " +
+        "**읽기 전용** — 그래프·문서·DB를 전혀 바꾸지 않는다.",
+      {
+        jdDocName: z
+          .string()
+          .optional()
+          .describe("JD 문서 이름(기본 '현재 JD')"),
+        evidenceDocNames: z
+          .array(z.string())
+          .optional()
+          .describe("증거로 볼 문서 이름 목록(생략 시 JD·'현재 JD'를 제외한 문서 전체)"),
+      },
+      async (args) => {
+        const jdName = (args.jdDocName ?? "현재 JD").trim() || "현재 JD";
+        const docs = listDocuments();
+        const jdMeta = docs.find((d) => d.name === jdName);
+        if (!jdMeta) {
+          return textResult(
+            `JD 문서 '${jdName}'을 찾을 수 없습니다. list_documents로 문서 이름을 확인하거나 ` +
+              `register_document(name="현재 JD", ...)로 JD를 먼저 등록하세요.`,
+          );
+        }
+        const jdDoc = getDocument(jdMeta.id);
+        if (!jdDoc) return textResult(`JD 문서를 읽을 수 없습니다: ${jdName}`);
+
+        // 증거 문서 결정: 지정되면 그 이름들, 아니면 JD·'현재 JD' 제외 전체.
+        let evidenceMetas;
+        if (args.evidenceDocNames && args.evidenceDocNames.length > 0) {
+          const wanted = new Set(args.evidenceDocNames.map((n) => n.trim()));
+          evidenceMetas = docs.filter((d) => wanted.has(d.name));
+        } else {
+          evidenceMetas = docs.filter((d) => d.name !== jdName && d.name !== "현재 JD");
+        }
+        if (evidenceMetas.length === 0) {
+          return textResult(
+            `증거로 삼을 문서가 없습니다(JD '${jdName}' 외 문서 없음). ` +
+              `경력·프로필 등 증거 문서를 register_document로 먼저 등록하세요.`,
+          );
+        }
+
+        const evidenceContents: { name: string; content: string }[] = [];
+        for (const m of evidenceMetas) {
+          const d = getDocument(m.id);
+          if (d) evidenceContents.push({ name: d.name, content: d.content });
+        }
+        const evidenceNorm = normalize(
+          evidenceContents.map((e) => e.content).join("\n"),
+        );
+
+        const requirements = extractRequirements(jdDoc.content);
+        if (requirements.length === 0) {
+          return textResult(
+            `JD '${jdName}'에서 요건 라인을 추출하지 못했습니다. ` +
+              `자격요건/필수/우대 섹션이나 불릿 목록이 있는지 확인하세요.`,
+          );
+        }
+
+        const covered: string[] = [];
+        const missing: string[] = [];
+        for (const req of requirements) {
+          if (isCovered(req, evidenceNorm)) covered.push(req);
+          else missing.push(req);
+        }
+        const ratio =
+          requirements.length > 0
+            ? Math.round((covered.length / requirements.length) * 100)
+            : 0;
+
+        const fmt = (arr: string[]) =>
+          arr.length ? arr.map((r) => `- ${r}`).join("\n") : "- (없음)";
+
+        return textResult(
+          [
+            `# JD 커버리지 요약: ${jdDoc.name} (v${jdDoc.currentVersion})`,
+            ``,
+            `참조 증거 문서: ${evidenceContents.map((e) => e.name).join(", ")}`,
+            `대략적 커버리지: ${ratio}% (${covered.length}/${requirements.length} 요건 매칭)`,
+            ``,
+            `## 커버된 요건 (${covered.length})`,
+            fmt(covered),
+            ``,
+            `## 누락 요건 (${missing.length})`,
+            fmt(missing),
+            ``,
+            `> 이 수치는 문자열 매칭 기반의 대략치입니다. 직군 자체가 다르면 커버리지가 크게 낮으니, ` +
+              `그럴 경우 실행 전에 사용자에게 불일치를 짚어 주세요.`,
+          ].join("\n"),
+        );
       },
     ),
   );
