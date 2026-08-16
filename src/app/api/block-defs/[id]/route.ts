@@ -3,7 +3,6 @@
 // DELETE /api/block-defs/[id]                          → { ok }
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
-import { db } from "@/lib/db/client";
 import { blockDefs } from "@/lib/db/schema";
 import {
   deleteBlockDef,
@@ -12,7 +11,7 @@ import {
   setBlockDefTray,
   updateBlockDefConfig,
 } from "@/lib/db/queries";
-import { getCurrentUserId } from "@/lib/auth/context";
+import { getCurrentUserId, getDb } from "@/lib/auth/context";
 import { eventBus } from "@/lib/engine/events";
 import type { NodeConfig } from "@/lib/types";
 import { withUser } from "@/lib/auth/with-user";
@@ -23,7 +22,7 @@ export const GET = withUser(async (
 ) => {
   const { id } = await ctx.params;
   // getBlockDef는 러너 공유라 owner-agnostic; 라우트에서 직접 소유권 검증.
-  const rows = await db.select({ id: blockDefs.id })
+  const rows = await getDb().select({ id: blockDefs.id })
     .from(blockDefs)
     .where(and(eq(blockDefs.id, id), eq(blockDefs.ownerId, getCurrentUserId())))
     .limit(1);
@@ -40,7 +39,7 @@ export const PATCH = withUser(async (
 ) => {
   const { id } = await ctx.params;
   // 소유권 확인 — getBlockDef는 러너 공유라 owner-agnostic; 라우트에서 직접 검증.
-  const rows = await db.select({ id: blockDefs.id })
+  const rows = await getDb().select({ id: blockDefs.id })
     .from(blockDefs)
     .where(and(eq(blockDefs.id, id), eq(blockDefs.ownerId, getCurrentUserId())))
     .limit(1);

@@ -38,9 +38,14 @@ export default defineConfig({
     stderr: "pipe",
     env: {
       RECRUIT_FLOW_E2E_STUB: "1",
-      // 격리 = 전용 e2e 데이터베이스. 런처가 매 실행마다 스키마를 리셋·시드한다.
+      // 격리 = 전용 e2e 데이터베이스. 런처가 매 실행마다 스키마를 리셋·GRANT·시드한다.
+      // ★ 슬라이스 4b: 앱은 rf_app(RLS 강제)으로, 리셋·마이그레이션·시드는
+      //   슈퍼유저(RF_ADMIN_DATABASE_URL)로. 런처가 두 URL을 모두 사용한다.
       DATABASE_URL:
         process.env.E2E_DATABASE_URL ??
+        "postgres://rf_app:rf_app@localhost:5433/recruit_flow_e2e",
+      RF_ADMIN_DATABASE_URL:
+        process.env.E2E_ADMIN_DATABASE_URL ??
         "postgres://postgres:postgres@localhost:5433/recruit_flow_e2e",
       E2E_PORT: PORT,
     },

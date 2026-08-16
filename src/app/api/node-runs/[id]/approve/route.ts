@@ -3,10 +3,9 @@
 // 채팅 카드·사이드 패널 공용. 인메모리 대기 없으면 러너가 DB에서 재하이드레이션(§8-E).
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { db } from "@/lib/db/client";
 import { nodeRuns } from "@/lib/db/schema";
 import { getRun } from "@/lib/db/queries";
-import { getCurrentUserId } from "@/lib/auth/context";
+import { getCurrentUserId, getDb } from "@/lib/auth/context";
 import { runner } from "@/lib/engine/runner";
 import { withUser } from "@/lib/auth/with-user";
 
@@ -17,7 +16,7 @@ export const POST = withUser(async (
   const { id } = await ctx.params;
 
   // node_run → run → 소유권 검증.
-  const nrRows = await db.select().from(nodeRuns).where(eq(nodeRuns.id, id)).limit(1);
+  const nrRows = await getDb().select().from(nodeRuns).where(eq(nodeRuns.id, id)).limit(1);
   if (!nrRows[0]) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }

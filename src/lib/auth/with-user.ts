@@ -8,6 +8,7 @@ type RouteHandler<C> = (req: Request, ctx: C) => Response | Promise<Response>;
 export function withUser<C>(handler: RouteHandler<C>): RouteHandler<C> {
   return async (req, ctx) => {
     const userId = await resolveUserId(req);
+    // runWithUser는 이제 async(예약 커넥션+GUC) — 반환 Promise를 그대로 await한다.
     return runWithUser(userId, () => handler(req, ctx));
   };
 }

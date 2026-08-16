@@ -1,10 +1,9 @@
 // GET /api/artifacts/[id]/download → HTML 파일 다운로드(Content-Disposition).
 // Output 노드의 html 아티팩트가 대상. 다른 format도 열람은 되지만 파일명 확장자 조정.
 import { eq } from "drizzle-orm";
-import { db } from "@/lib/db/client";
 import { nodeRuns } from "@/lib/db/schema";
 import { getArtifact, getRun } from "@/lib/db/queries";
-import { getCurrentUserId } from "@/lib/auth/context";
+import { getCurrentUserId, getDb } from "@/lib/auth/context";
 import { withUser } from "@/lib/auth/with-user";
 
 export const runtime = "nodejs";
@@ -20,7 +19,7 @@ export const GET = withUser(async (
   }
 
   // artifact → node_run → run → 소유권 검증.
-  const nrRows = await db.select().from(nodeRuns).where(eq(nodeRuns.id, artifact.nodeRunId)).limit(1);
+  const nrRows = await getDb().select().from(nodeRuns).where(eq(nodeRuns.id, artifact.nodeRunId)).limit(1);
   if (!nrRows[0]) {
     return new Response("not found", { status: 404 });
   }

@@ -7,6 +7,7 @@ import { appendChatMessage, getPipeline, listChatMessages } from "@/lib/db/queri
 import { eventBus } from "@/lib/engine/events";
 import { runChat } from "@/lib/engine/chat";
 import { withUser } from "@/lib/auth/with-user";
+import { getCurrentUserId, runWithUser } from "@/lib/auth/context";
 
 // DB·엔진 싱글턴을 사용하므로 Node 런타임 강제.
 export const runtime = "nodejs";
@@ -37,7 +38,15 @@ export const POST = withUser(async (
   // 3. runChat 백그라운드(fire-and-forget) — await 하지 않고 200 즉시 반환.
   const runIdRef: { current: string | null } = { current: null };
 
-  void (async () => {
+  // ★ 슬라이스 4b 함정(auth.md §4): 아래 IIFE는 요청 반환 후에도 계속 DB를 쓴다
+  //   (runChat의 add_block=block_defs, edit_document, assistant chat_messages, 카드 등).
+  //   이 시점엔 요청의 예약 커넥션이 이미 RESET+release돼, ALS store의 db 핸들이
+  //   가리키는 커넥션엔 GUC가 사라진다(RLS 닫힌 실패·WITH CHECK 위반). 따라서 백그라운드
+  //   작업 전체를 자체 runWithUser(ownerId)로 감싸 새 예약 커넥션+GUC를 세운다. ownerId는
+  //   요청 컨텍스트에서 문자열로 확보한다(예약 커넥션 반납과 무관하게 유효).
+  const ownerId = getCurrentUserId();
+
+  void runWithUser(ownerId, async () => {
     try {
       const history = await listChatMessages(pipelineId);
       // 히스토리에서 방금 저장한 user 메시지는 이미 포함됨 — runChat 내부에서
@@ -68,7 +77,7 @@ export const POST = withUser(async (
       }, null, null, assistantMessageId);
       eventBus.emitChatMessage(pipelineId, errMsg);
     }
-  })();
+  });
 
   // 즉시 200 반환(fire-and-forget, 결정 C).
   return NextResponse.json({ ok: true });

@@ -16,7 +16,7 @@ import {
   setNodeRunStatus,
   setRunStatus,
 } from "../db/queries";
-import { db } from "../db/client";
+import { adminDb } from "../db/client";
 import { nodeRuns as nodeRunsTable, runs as runsTable } from "../db/schema";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { validateGraph } from "../validation";
@@ -39,7 +39,7 @@ import { eventBus } from "./events";
 import { buildGateContext, evaluateGate, GateExprError } from "./gate";
 import { humanWait, type HumanApproval } from "./human";
 import { runInputNode } from "./input-node";
-import { getCurrentUserId, runWithUser } from "../auth/context";
+import { getCurrentUserId, getDb, runWithUser } from "../auth/context";
 import { deriveMounts } from "./mount";
 import { runOutputNode } from "./output-node";
 import { finalizeArtifact, createArtifact } from "../db/queries";
@@ -112,43 +112,54 @@ class Runner {
     // R3: 요청 컨텍스트에서 소유자를 확보해 control에 각인한다. createRun도 같은
     // 컨텍스트에서 owner_id를 각인하므로 둘이 항상 일치한다. 백그라운드 drive는
     // 이 값으로 runWithUser를 다시 건다(launch 참조).
-    const ownerId = getCurrentUserId();
-    const graph = await getGraph(pipelineId);
-
-    // engine.md §1: 스냅샷 생성 시 참조를 resolve — 각 노드 config를 완결화하고
-    // Agent의 config.mounts도 정의를 박제한다. 이 완결 스냅샷을 runs.graph_snapshot에
-    // 저장하고 러너도 그것으로 실행하므로, 실행 시작 후 정의를 고쳐도 이 run은 불변.
     //
-    // 검증도 반드시 resolve 뒤에 한다: 참조 노드는 raw config={}(실효 config는
-    // block_def)라 outputFormat이 raw에는 없다. resolve 전 그래프로 검증하면
-    // 참조 Agent의 outputFormat을 못 읽어 gate_json_upstream/output_markdown_count를
-    // 오검증한다(R1 회귀). resolveGraph는 한 번만 호출.
-    const snapshot = await resolveGraph(graph);
-    const errors: ValidationError[] = validateGraph(snapshot.nodes, snapshot.edges);
-    if (errors.length > 0) return { errors };
+    // ★ 슬라이스 4 함정(auth.md §4): 챗 라우트는 runChat을 fire-and-forget으로
+    //   띄우고 즉시 200을 반환한다. runChat→trigger_run→runner.start가 도는 시점엔
+    //   요청의 예약 커넥션이 이미 RESET+release됐을 수 있어, 여기서 ALS getDb()를
+    //   그대로 쓰면 GUC 없는 풀 커넥션(닫힌 실패)에 걸린다. 그래서 아래 시작 쿼리
+    //   (getGraph·createRun·검증·초기 큐잉)를 자체 runWithUser(ownerId)로 감싸 새
+    //   예약 커넥션+GUC를 세운다. ownerId는 ALS store 값(문자열)이라 예약 커넥션
+    //   반납 후에도 유효하다. launch의 drive는 그 안에서 또 자체 스코프를 연다
+    //   (중첩 runWithUser — 각자 커넥션을 예약하므로 안전).
+    const ownerId = getCurrentUserId();
+    return runWithUser(ownerId, async () => {
+      const graph = await getGraph(pipelineId);
 
-    const run = await createRun(pipelineId, snapshot, null);
-    const control = this.buildControl(run.id, pipelineId, snapshot, ownerId);
+      // engine.md §1: 스냅샷 생성 시 참조를 resolve — 각 노드 config를 완결화하고
+      // Agent의 config.mounts도 정의를 박제한다. 이 완결 스냅샷을 runs.graph_snapshot에
+      // 저장하고 러너도 그것으로 실행하므로, 실행 시작 후 정의를 고쳐도 이 run은 불변.
+      //
+      // 검증도 반드시 resolve 뒤에 한다: 참조 노드는 raw config={}(실효 config는
+      // block_def)라 outputFormat이 raw에는 없다. resolve 전 그래프로 검증하면
+      // 참조 Agent의 outputFormat을 못 읽어 gate_json_upstream/output_markdown_count를
+      // 오검증한다(R1 회귀). resolveGraph는 한 번만 호출.
+      const snapshot = await resolveGraph(graph);
+      const errors: ValidationError[] = validateGraph(snapshot.nodes, snapshot.edges);
+      if (errors.length > 0) return { errors };
 
-    // 루트 노드(상류 없는 flow 노드)만 초기 큐잉 — node_run 생성.
-    // 장착 계층 노드(skill/rule/tool)는 실행 대상이 아니므로 node_run을 만들지
-    // 않는다 — mount 엣지의 source라 상류가 없어 root로 잡히지만, 실행되지
-    // 않고 skipUnhandled에서도 제외돼 queued 유령 행으로 남기 때문.
-    for (const nodeId of rootNodeIds(control.index)) {
-      const n = control.index.nodeById.get(nodeId);
-      if (n?.type === "skill" || n?.type === "rule" || n?.type === "tool") continue;
-      await this.ensureNodeRun(control, nodeId, 1, "queued");
-    }
+      const run = await createRun(pipelineId, snapshot, null);
+      const control = this.buildControl(run.id, pipelineId, snapshot, ownerId);
 
-    this.controls.set(run.id, control);
-    await this.emitRunStatus(control, "running");
-    await this.emitChatCard(control, "card_run", {
-      event: "started",
-      title: "실행 시작",
+      // 루트 노드(상류 없는 flow 노드)만 초기 큐잉 — node_run 생성.
+      // 장착 계층 노드(skill/rule/tool)는 실행 대상이 아니므로 node_run을 만들지
+      // 않는다 — mount 엣지의 source라 상류가 없어 root로 잡히지만, 실행되지
+      // 않고 skipUnhandled에서도 제외돼 queued 유령 행으로 남기 때문.
+      for (const nodeId of rootNodeIds(control.index)) {
+        const n = control.index.nodeById.get(nodeId);
+        if (n?.type === "skill" || n?.type === "rule" || n?.type === "tool") continue;
+        await this.ensureNodeRun(control, nodeId, 1, "queued");
+      }
+
+      this.controls.set(run.id, control);
+      await this.emitRunStatus(control, "running");
+      await this.emitChatCard(control, "card_run", {
+        event: "started",
+        title: "실행 시작",
+      });
+
+      this.launch(control);
+      return { runId: run.id };
     });
-
-    this.launch(control);
-    return { runId: run.id };
   }
 
   /**
@@ -161,54 +172,59 @@ class Runner {
     upstreamRunId: string,
   ): Promise<RunStartResult> {
     // R3: start와 동일 — 요청 컨텍스트에서 소유자 각인.
+    // ★ 슬라이스 4 함정(auth.md §4): start와 동일하게 시작 쿼리를 자체
+    //   runWithUser(ownerId)로 감싸 새 예약 커넥션+GUC를 세운다(챗 fire-and-forget
+    //   경로에서 요청 예약 커넥션이 이미 반납됐을 수 있으므로).
     const ownerId = getCurrentUserId();
-    const liveGraph = await getGraph(pipelineId);
+    return runWithUser(ownerId, async () => {
+      const liveGraph = await getGraph(pipelineId);
 
-    // 부분 재실행도 현재 그래프를 resolve해 완결 스냅샷으로 고정(engine.md §1).
-    // 검증은 resolve 뒤에 — 참조 노드 outputFormat이 block_def에 있어 raw로는
-    // 오검증되기 때문(start와 동일한 R1 회귀 방지).
-    const graph = await resolveGraph(liveGraph);
-    const errors: ValidationError[] = validateGraph(graph.nodes, graph.edges);
-    if (errors.length > 0) return { errors };
-    const index = indexGraph(graph.nodes, graph.edges);
-    if (!index.nodeById.has(fromNodeId)) {
-      return {
-        errors: [
-          { code: "orphan", nodeId: fromNodeId, message: "재실행 시작 노드가 그래프에 없습니다." },
-        ],
-      };
-    }
+      // 부분 재실행도 현재 그래프를 resolve해 완결 스냅샷으로 고정(engine.md §1).
+      // 검증은 resolve 뒤에 — 참조 노드 outputFormat이 block_def에 있어 raw로는
+      // 오검증되기 때문(start와 동일한 R1 회귀 방지).
+      const graph = await resolveGraph(liveGraph);
+      const errors: ValidationError[] = validateGraph(graph.nodes, graph.edges);
+      if (errors.length > 0) return { errors };
+      const index = indexGraph(graph.nodes, graph.edges);
+      if (!index.nodeById.has(fromNodeId)) {
+        return {
+          errors: [
+            { code: "orphan", nodeId: fromNodeId, message: "재실행 시작 노드가 그래프에 없습니다." },
+          ],
+        };
+      }
 
-    const run = await createRun(pipelineId, graph, upstreamRunId);
+      const run = await createRun(pipelineId, graph, upstreamRunId);
 
-    // from_node의 상류 전이 폐포(엄격 상류 — from_node 제외) 복사 대상.
-    const closure = upstreamClosure(index, fromNodeId);
-    // 현재 그래프에 존재하는 노드만 복사(id 불일치 상류는 재실행).
-    const copyTargets = [...closure].filter((id) => index.nodeById.has(id));
-    const copied = await copyUpstreamArtifacts(run.id, upstreamRunId, copyTargets);
+      // from_node의 상류 전이 폐포(엄격 상류 — from_node 제외) 복사 대상.
+      const closure = upstreamClosure(index, fromNodeId);
+      // 현재 그래프에 존재하는 노드만 복사(id 불일치 상류는 재실행).
+      const copyTargets = [...closure].filter((id) => index.nodeById.has(id));
+      const copied = await copyUpstreamArtifacts(run.id, upstreamRunId, copyTargets);
 
-    const control = this.buildControl(run.id, pipelineId, graph, ownerId);
-    // 복사된 노드는 succeeded로 표시(재실행 안 함) + nodeRun id 매핑 확보.
-    const copiedSet = new Set(copied);
-    await this.hydrateCopiedNodeRuns(control, copiedSet);
+      const control = this.buildControl(run.id, pipelineId, graph, ownerId);
+      // 복사된 노드는 succeeded로 표시(재실행 안 함) + nodeRun id 매핑 확보.
+      const copiedSet = new Set(copied);
+      await this.hydrateCopiedNodeRuns(control, copiedSet);
 
-    // from_node를 큐잉(복사 폐포는 succeeded 취급되어 join 충족).
-    await this.ensureNodeRun(control, fromNodeId, 1, "queued");
-    // from_node의 상류 중 복사 못 한 게 있으면(id 불일치) 그 상류부터 재큐잉.
-    for (const upId of index.upstream.get(fromNodeId) ?? []) {
-      if (!copiedSet.has(upId)) await this.ensureNodeRun(control, upId, 1, "queued");
-    }
+      // from_node를 큐잉(복사 폐포는 succeeded 취급되어 join 충족).
+      await this.ensureNodeRun(control, fromNodeId, 1, "queued");
+      // from_node의 상류 중 복사 못 한 게 있으면(id 불일치) 그 상류부터 재큐잉.
+      for (const upId of index.upstream.get(fromNodeId) ?? []) {
+        if (!copiedSet.has(upId)) await this.ensureNodeRun(control, upId, 1, "queued");
+      }
 
-    this.controls.set(run.id, control);
-    await this.emitRunStatus(control, "running");
-    await this.emitChatCard(control, "card_run", {
-      event: "started",
-      title: "부분 재실행 시작",
-      fromNodeId,
+      this.controls.set(run.id, control);
+      await this.emitRunStatus(control, "running");
+      await this.emitChatCard(control, "card_run", {
+        event: "started",
+        title: "부분 재실행 시작",
+        fromNodeId,
+      });
+
+      this.launch(control);
+      return { runId: run.id };
     });
-
-    this.launch(control);
-    return { runId: run.id };
   }
 
   private buildControl(
@@ -243,7 +259,7 @@ class Runner {
     copied: Set<string>,
   ): Promise<void> {
     if (copied.size === 0) return;
-    const rows = await db
+    const rows = await getDb()
       .select()
       .from(nodeRunsTable)
       .where(and(eq(nodeRunsTable.runId, control.runId), eq(nodeRunsTable.status, "succeeded")));
@@ -822,7 +838,7 @@ class Runner {
     }
     // 세션이 죽었으면 이 node_run을 failed로 마감(부분 재실행 유도).
     const nr = (
-      await db.select().from(nodeRunsTable).where(eq(nodeRunsTable.id, nodeRunId)).limit(1)
+      await getDb().select().from(nodeRunsTable).where(eq(nodeRunsTable.id, nodeRunId)).limit(1)
     )[0];
     if (nr && nr.status === "waiting_human") {
       await setNodeRunStatus(nodeRunId, "failed", "프로세스 재시작으로 갭 인터뷰 세션이 종료됨");
@@ -838,7 +854,7 @@ class Runner {
    */
   private async rehydrateForApproval(nodeRunId: string): Promise<boolean> {
     const nr = (
-      await db.select().from(nodeRunsTable).where(eq(nodeRunsTable.id, nodeRunId)).limit(1)
+      await getDb().select().from(nodeRunsTable).where(eq(nodeRunsTable.id, nodeRunId)).limit(1)
     )[0];
     if (!nr || nr.status !== "waiting_human") return false;
     const run = await getRun(nr.runId);
@@ -861,7 +877,7 @@ class Runner {
 
     const control = this.buildControl(run.id, run.pipelineId, snapshot, ownerId);
     // DB의 node_run 상태로 control 복원.
-    const rows = await db
+    const rows = await getDb()
       .select()
       .from(nodeRunsTable)
       .where(eq(nodeRunsTable.runId, run.id))
@@ -1162,7 +1178,7 @@ class Runner {
   }
 
   private async countSucceeded(runId: string): Promise<number> {
-    const rows = await db
+    const rows = await getDb()
       .select({ status: nodeRunsTable.status })
       .from(nodeRunsTable)
       .where(eq(nodeRunsTable.runId, runId));
@@ -1174,11 +1190,11 @@ class Runner {
     runId: string,
     status: RunStatus = "failed",
   ): Promise<void> {
-    await db
+    await getDb()
       .update(nodeRunsTable)
       .set({ status: "failed", endedAt: Date.now(), error: "프로세스 재시작으로 중단" })
       .where(and(eq(nodeRunsTable.runId, runId), inArray(nodeRunsTable.status, ["running", "waiting_human"])));
-    await db
+    await getDb()
       .update(nodeRunsTable)
       .set({ status: "skipped", endedAt: Date.now() })
       .where(and(eq(nodeRunsTable.runId, runId), eq(nodeRunsTable.status, "queued")));
@@ -1199,7 +1215,12 @@ class Runner {
     // (auth.md §5), 마감 대상 run의 owner_id를 읽어 각 run의 DB 쓰기를 그 owner의
     // runWithUser로 다시 감싼다. 백필 뒤 null이면 안 되지만, 레거시 null은 조용히
     // 건너뛴다(throw 금지).
-    const runningRuns = await db
+    //
+    // ★ 스캔은 adminDb(슈퍼유저)로 읽는다(auth.md §5). 부팅엔 GUC가 없어 rf_app 앱
+    //   커넥션은 RLS 닫힌 실패로 0행을 본다 — 모든 owner의 고아 run을 읽어야 하므로
+    //   스캔만 RLS를 우회한다. 이후 마감 "쓰기"는 반드시 runWithUser(owner)로 감싸
+    //   rf_app+GUC를 거친다(테넌트 쓰기 우회 금지 = R3 유지).
+    const runningRuns = await adminDb
       .select({ id: runsTable.id, ownerId: runsTable.ownerId })
       .from(runsTable)
       .where(eq(runsTable.status, "running"));
@@ -1211,8 +1232,8 @@ class Runner {
     // waiting_human run은 복원 유지(마감 안 함) — approve로 재개. 단, 크래시로
     // 남은 병렬 형제 node_run(running/queued)은 인메모리 실행이 사라져 재개
     // 불가하므로 failed로 마감한다(재개 시 중복 실행·유령 행 방지). 대기 노드
-    // (status=waiting_human) 자체는 건드리지 않는다.
-    const waitingRuns = await db
+    // (status=waiting_human) 자체는 건드리지 않는다. 스캔은 위와 동일 이유로 adminDb.
+    const waitingRuns = await adminDb
       .select({ id: runsTable.id, ownerId: runsTable.ownerId })
       .from(runsTable)
       .where(eq(runsTable.status, "waiting_human"));
@@ -1225,11 +1246,11 @@ class Runner {
 
   /** waiting_human run에서 크래시로 남은 running/queued 형제 node_run을 마감. */
   private async cleanupStaleSiblings(runId: string): Promise<void> {
-    await db
+    await getDb()
       .update(nodeRunsTable)
       .set({ status: "failed", endedAt: Date.now(), error: "프로세스 재시작으로 중단" })
       .where(and(eq(nodeRunsTable.runId, runId), eq(nodeRunsTable.status, "running")));
-    await db
+    await getDb()
       .update(nodeRunsTable)
       .set({ status: "skipped", endedAt: Date.now() })
       .where(and(eq(nodeRunsTable.runId, runId), eq(nodeRunsTable.status, "queued")));
@@ -1242,7 +1263,7 @@ class Runner {
   /** 부분 재실행의 상류 출처 = 직전 완료(succeeded/gate_failed/failed 등 종결) run. */
   async latestFinishedRunId(pipelineId: string): Promise<string | null> {
     const row = (
-      await db
+      await getDb()
         .select({ id: runsTable.id })
         .from(runsTable)
         .where(
