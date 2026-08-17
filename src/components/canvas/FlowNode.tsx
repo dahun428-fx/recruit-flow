@@ -10,6 +10,12 @@ import type { MountRef, NodeType } from "@/lib/types";
 import type { NodeVisualStatus } from "@/store/canvas";
 import styles from "./FlowNode.module.css";
 
+// 노드 수동 더블클릭 감지(모듈 스코프 — 노드 인스턴스 간 공유). ReactFlow가 native
+// dblclick·onNodeDoubleClick을 삼키므로, 확실히 발화하는 DOM onClick의 시각차로
+// 더블클릭을 감지한다. 물리 더블클릭·연속 두 번 클릭 모두 500ms 내면 상세를 연다.
+let lastNodeClick: { id: string; t: number } = { id: "", t: 0 };
+const DOUBLE_CLICK_MS = 500;
+
 export interface FlowNodeData {
   type: NodeType;
   name: string;
@@ -106,9 +112,16 @@ export function FlowNode({ data, selected, id: rfId }: NodeProps) {
       d.onHumanClick!(nodeId);
       return;
     }
-    // 노드 클릭 → 정의 파일 탭 열기
-    if (d.onNodeClick) {
-      d.onNodeClick(nodeId, d.blockDefId ?? null);
+    // 같은 노드를 500ms 내 두 번 클릭 = 더블클릭 → 상세(정의 탭) 열기. 단일 클릭은 선택만.
+    const t = e.timeStamp;
+    if (lastNodeClick.id === nodeId && t - lastNodeClick.t < DOUBLE_CLICK_MS) {
+      lastNodeClick = { id: "", t: 0 };
+      if (d.onNodeClick) {
+        e.stopPropagation();
+        d.onNodeClick(nodeId, d.blockDefId ?? null);
+      }
+    } else {
+      lastNodeClick = { id: nodeId, t };
     }
   }
 

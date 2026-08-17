@@ -618,6 +618,9 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
         onNodeContextMenu={readOnly ? undefined : onNodeContextMenu}
         onEdgeContextMenu={readOnly ? undefined : onEdgeContextMenu}
         fitView
+        // 더블클릭은 노드 상세 열기용(FlowNode.onDoubleClick) — 캔버스 줌과 충돌하지
+        // 않게 ReactFlow의 더블클릭 줌을 끈다. 줌은 컨트롤·휠로.
+        zoomOnDoubleClick={false}
         deleteKeyCode={readOnly ? [] : ["Backspace", "Delete"]}
         nodesDraggable={!readOnly}
         edgesReconnectable={!readOnly}

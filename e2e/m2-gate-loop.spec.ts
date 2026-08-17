@@ -54,8 +54,10 @@ test("M2: writer→[scorer-a∥scorer-b]→gate(pass)→output — 재작성 후
   const writerRuns = state.nodeRuns.filter((nr) => nr.nodeId === writer);
   expect(writerRuns.length).toBeGreaterThanOrEqual(2);
 
-  // writer 노드 클릭 → 아티팩트 탭 → 회차 칩
-  await page.locator(`[data-testid="node-${writer}"]`).click();
+  // writer 노드 더블클릭(두 번 클릭) → 노드 탭 → 아티팩트 탭 → 회차 칩(단일 클릭은 선택만)
+  const writerNode = page.locator(`[data-testid="node-${writer}"]`);
+  await writerNode.click();
+  await writerNode.click();
   await page.locator('[data-testid="artifact-tab"]').click();
 
   // 회차 칩이 writerRuns 수만큼 있어야 함

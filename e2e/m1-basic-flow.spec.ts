@@ -51,9 +51,13 @@ test("M1: 문서 탭 문서 확인 → 실행 → 노드 상태 → 아티팩트
   const state = await waitForRun(request, runId, { timeoutMs: 60_000 });
   expect(state.run.status).toBe("succeeded");
 
-  // 8. Output 노드 클릭 → 노드 탭 열림 → 아티팩트 탭 → 다운로드 버튼
-  // M4: 노드 클릭 시 노드 편집기 탭이 열리므로 캔버스 탭 노드 카드 대신 노드 탭에서 확인.
-  await page.locator(`[data-testid="node-${out}"]`).click();
+  // 8. Output 노드 더블클릭 → 노드 탭 열림 → 아티팩트 탭 → 다운로드 버튼
+  // M4: 노드 더블클릭 시 노드 편집기 탭이 열린다(단일 클릭은 선택만).
+  // ReactFlow가 native dblclick을 삼켜 Playwright .dblclick()은 onClick을 1회만
+  // 발화하므로, 실제 더블클릭처럼 두 번 클릭한다.
+  const outNode = page.locator(`[data-testid="node-${out}"]`);
+  await outNode.click();
+  await outNode.click();
   await page.locator('[data-testid="artifact-tab"]').click();
   const panelDownload = page.getByTestId("download-html-panel");
   await expect(panelDownload).toBeVisible({ timeout: 10_000 });

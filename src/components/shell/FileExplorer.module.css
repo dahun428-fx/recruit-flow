@@ -4,6 +4,10 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* 부모 래퍼(width: explorer.size)를 꽉 채운다 — flex 미지정이면 내용 폭으로
+     줄어들어 리사이즈 시 패널 우측에 이격(흰 틈)이 생긴다. */
+  flex: 1;
+  width: 100%;
   background: var(--surface);
   border-right: 1px solid var(--border);
   overflow: hidden;
