@@ -171,11 +171,19 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
     return () => window.removeEventListener("rf:blockDefsChanged", loadBlockDefs);
   }, [loadBlockDefs]);
 
-  // 컨텍스트 메뉴 외부 클릭 시 닫기
+  // 컨텍스트 메뉴 외부 클릭 시 닫기.
+  // ★ 메뉴 "내부" mousedown이면 닫지 않는다 — 실제 마우스 클릭은 mousedown이
+  //   먼저 발화하는데, 여기서 메뉴를 닫으면(contextMenu=null) 이어지는 버튼 onClick
+  //   (handleRemoveNode 등)이 조기 반환해 동작하지 않는다(노드 제거·재실행·선 삭제·
+  //   자동정렬 전부 무반응 버그). 메뉴 div의 onMouseDown stopPropagation은 native
+  //   document 리스너를 못 막으므로, 타깃이 메뉴 내부인지 여기서 직접 확인한다.
   useEffect(() => {
-    function onDown() {
+    function onDown(e: MouseEvent) {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.('[class*="contextMenu"]')) return;
       setContextMenu(null);
       setEdgeContextMenu(null);
+      setPaneContextMenu(null);
     }
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
