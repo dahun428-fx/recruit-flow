@@ -216,12 +216,19 @@ export function InputForm({
   overriddenKeys: Set<string> | null;
 }) {
   const [docs, setDocs] = useState<Document[]>([]);
+  const [docsLoaded, setDocsLoaded] = useState(false);
   // JD 붙여넣기 — documentId 모드용 상태
   const [pasteText, setPasteText] = useState("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   useEffect(() => {
-    api.listDocuments().then(setDocs).catch(() => {});
+    api
+      .listDocuments()
+      .then((d) => {
+        setDocs(d);
+        setDocsLoaded(true);
+      })
+      .catch(() => setDocsLoaded(true));
   }, []);
 
   // 선택된 문서 정보 조회
@@ -275,8 +282,21 @@ export function InputForm({
         </select>
       </div>
 
-      {/* documentId 모드: JD 붙여넣기 — 새 버전 저장 (M5 워크스트림 A-3) */}
-      {config.documentId && (
+      {/* 참조 documentId가 있으나 문서 목록에 없음 = 삭제/교체된 문서를 가리킴.
+          붙여넣기 저장 박스는 대상이 없어 무조건 실패하므로, 대신 재선택을 안내한다. */}
+      {config.documentId && docsLoaded && !selectedDoc && (
+        <div
+          className={panelStyles.field}
+          style={{ color: "#e53e3e", fontSize: 12, lineHeight: 1.6 }}
+        >
+          참조 문서를 찾을 수 없습니다(삭제되었거나 교체됨). 위의 <b>문서 선택</b>에서
+          문서를 다시 지정하세요 — 그래야 새 버전 저장·실행이 됩니다.
+        </div>
+      )}
+
+      {/* documentId 모드: JD 붙여넣기 — 새 버전 저장 (M5 워크스트림 A-3).
+          참조 문서가 실제로 존재할 때만 노출(없으면 저장 대상이 없어 실패). */}
+      {config.documentId && selectedDoc && (
         <div className={panelStyles.field}>
           <label
             data-tip="참조 문서에 새 내용을 붙여넣으면 다음 run이 이 버전을 사용합니다. documentId 재배선 없이 JD를 교체할 수 있습니다(nodes.md §3 JD 교체 반복 루프 규약)"
