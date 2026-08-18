@@ -131,6 +131,23 @@ resolveUserId(req): Promise<string>  // ★ 유일한 스왑 지점.
 - `provisionSeedForUser(userId)`(`src/lib/seed/provision.ts`) — 시드 카탈로그
   (`src/lib/seed/catalog.ts`, 코드 상수)의 block_defs·증거 문서를 새 userId로
   각인해 트랜잭션 복제.
+- **표준 파이프라인 시드(정본):** 카탈로그는 block_defs·문서에 더해 **표준
+  파이프라인 1개**(`STARTER_PIPELINE` 상수: nodes/edges)를 포함하며,
+  `provisionSeedForUser`가 이를 owner 각인해 함께 복제한다(pipelines 1행 +
+  nodes/edges). 노드의 `mounts[].blockDefId`(Agent 장착)·`config.documentId`
+  (Input 참조)는 **같은 트랜잭션에서 삽입한 시드 block_def·문서의 실제 id로
+  해소**한다(삽입 순서 의존). 관문 조건식의 출처 접두는 상류 노드 `name`과
+  정확히 일치해야 하므로(engine.md Gate), 시드 노드명↔조건식↔채점기
+  `jsonSchema`는 세트로 검증한다. 정본 원문(규칙·기술 본문·문서·템플릿)은
+  저장소 루트 `seed/`에 UTF-8 파일로 두고 카탈로그가 읽어 주입한다(유지보수
+  지점 1곳, Windows CLI 한글 함정 회피).
+- **로컬 정본 재시드** `npm run seed:canonical`(`scripts/`) — `DEV_OWNER_ID`
+  소유 block_defs·documents·document_versions·pipelines·nodes·edges·runs(+하위
+  artifacts·node_runs)를 **비우고** 카탈로그를 재삽입. 멱등. 삭제는 owner
+  스코프로만 한정하고(다른 owner 행 불변), 실행 시 대상 개수·이름을 출력한 뒤
+  `--yes` 없으면 중단한다(실 DB 오조작 방지, CLAUDE.md 실 DB 안전규칙 정합).
+  부트 마이그레이션·e2e 시드와 분리 — 콘텐츠를 스키마 마이그레이션에 싣지
+  않는다.
 - CLI 래퍼 `scripts/provision-user.mts <email>` — `app_users` 삽입 후 위 함수
   호출. **스왑 지점:** Phase 2b에서 GoTrue `on_auth_user_created`가 이 함수를
   호출한다. 기존 ETL 112행은 `DEV_OWNER_ID` 소유로 남긴다(시드와 분리).

@@ -1,0 +1,898 @@
+@font-face {
+  font-family: "Noto Sans KR";
+  src: local("Noto Sans KR");
+}
+
+/* Tokens derived from DESIGN.md (document-first A4, ink-on-paper).
+   Layout/sizing follows the compact résumé structure; colors, rules,
+   typography family, square corners and no-fill rules follow DESIGN.md. */
+:root {
+  --text: #1f1f1f;       /* primary ink: body, headings, emphasis */
+  --body: #3f4650;       /* secondary / supporting copy (subtext) */
+  --muted: #777777;      /* labels, page numbers, footer */
+  --line: #d7d7d7;       /* standard rule */
+  --line-soft: #eeeeee;  /* hairline under topic titles */
+  --line-strong: #1f1f1f;/* strong divider under headers */
+  --accent: #1f3d55;     /* deep navy — sparing identity emphasis only */
+  --background: #fff;
+  --canvas: #eee;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--canvas);
+  color: var(--text);
+  font-family: "Noto Sans KR", "Malgun Gothic", sans-serif;
+  word-break: keep-all;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+body {
+  padding: 24px 0;
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18mm;
+}
+
+.page {
+  position: relative;
+  width: 210mm;
+  height: 297mm;
+  padding: 18mm 19mm 17mm;
+  overflow: hidden;
+  background: var(--background);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+h1,
+h2,
+h3,
+h4,
+p,
+dl,
+dd,
+ul,
+ol {
+  margin: 0;
+}
+
+/* DESIGN.md: emphasis is bolder ink, NOT a different color. */
+strong {
+  color: var(--text);
+  font-weight: 800;
+}
+
+.top-title {
+  padding-bottom: 6mm;
+}
+
+.top-title h1 {
+  font-size: 21pt;
+  line-height: 1.25;
+  font-weight: 700;
+}
+
+.info-box {
+  display: grid;
+  grid-template-columns: 31mm 1fr;
+  min-height: 40mm;
+  border: 1px solid var(--line);
+}
+
+.photo {
+  width: 31mm;
+  height: 40mm;
+  object-fit: cover;
+  object-position: 50% 20%;
+  border-right: 1px solid var(--line);
+}
+
+.personal {
+  padding: 4.8mm 6.4mm;
+}
+
+.name-row {
+  display: flex;
+  align-items: baseline;
+  gap: 3mm;
+}
+
+.name-row h2 {
+  font-size: 13.5pt;
+  font-weight: 800;
+}
+
+.name-row span {
+  color: var(--muted);
+  font-size: 7.6pt;
+}
+
+.contact-grid {
+  display: grid;
+  grid-template-columns: 18mm 1fr 18mm 1fr;
+  gap: 2.8mm 5mm;
+  margin-top: 5.6mm;
+  font-size: 7.8pt;
+  line-height: 1.42;
+}
+
+.contact-grid dt {
+  color: var(--muted);
+}
+
+.contact-grid dd {
+  color: var(--body);
+  font-weight: 700;
+}
+
+.contact-grid dd.wide {
+  grid-column: span 3;
+}
+
+.page-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  padding-bottom: 5mm;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.page-head h1 {
+  font-size: 14.5pt;
+  line-height: 1.35;
+  font-weight: 700;
+}
+
+.page-head p {
+  margin-top: 1mm;
+  color: var(--body);
+  font-size: 8.1pt;
+}
+
+.page-head span {
+  color: var(--muted);
+  font-size: 8.2pt;
+  font-weight: 700;
+}
+
+.section {
+  margin-top: 7mm;
+}
+
+.section h2 {
+  padding-bottom: 2.4mm;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 13.2pt;
+  font-weight: 700;
+}
+
+.copy {
+  display: grid;
+  gap: 2.8mm;
+  margin-top: 3.4mm;
+}
+
+.copy p,
+.meta p {
+  color: var(--body);
+  font-size: 8pt;
+  line-height: 1.72;
+}
+
+.achievement-list,
+.bullet-list {
+  margin-top: 3.6mm;
+  padding-left: 4.2mm;
+}
+
+.achievement-list li,
+.bullet-list li {
+  color: var(--body);
+  font-size: 7.8pt;
+  line-height: 1.6;
+  padding-left: 1mm;
+}
+
+.achievement-list li + li,
+.bullet-list li + li {
+  margin-top: 1.55mm;
+}
+
+/* First-page: compact summary paragraphs to fit 3 long paragraphs */
+.first-page .copy p {
+  font-size: 7.8pt;
+  line-height: 1.66;
+}
+
+.record {
+  margin-top: 5.4mm;
+  padding-bottom: 4.8mm;
+  border-bottom: 1px solid var(--line);
+}
+
+.record:last-child {
+  border-bottom: 0;
+}
+
+/* record header: title left, date right on the same row (no left indent) */
+.record-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 5mm;
+}
+
+.record-title h3 {
+  font-size: 10.5pt;
+  line-height: 1.42;
+}
+
+.record-title span {
+  flex: none;
+  color: var(--muted);
+  font-size: 7.8pt;
+  font-weight: 700;
+}
+
+.record > p {
+  margin-top: 1.2mm;
+  color: var(--body);
+  font-size: 7.8pt;
+  line-height: 1.66;
+}
+
+.first-page .top-title {
+  padding-bottom: 5mm;
+}
+
+.first-page .section {
+  margin-top: 6mm;
+}
+
+.plain-page .section:first-of-type {
+  margin-top: 0;
+}
+
+.career-section {
+  margin-top: 6mm;
+}
+
+.career-section .copy {
+  margin-top: 0;
+}
+
+.career-section .copy p {
+  color: var(--text);
+  font-weight: 800;
+}
+
+/* Skills — DESIGN.md: no fills, no left-border callouts. Group with spacing
+   and a single bottom hairline. */
+.skill-block {
+  margin-top: 5.4mm;
+  padding-bottom: 4.8mm;
+  border-bottom: 1px solid var(--line);
+}
+
+.skill-block:last-of-type {
+  border-bottom: 0;
+}
+
+.skill-block h2 {
+  padding: 0;
+  border: 0;
+  color: var(--text);
+  font-size: 11pt;
+  font-weight: 800;
+}
+
+.skill-stack {
+  margin-top: 1.8mm;
+  color: var(--accent);
+  font-size: 7.8pt;
+  font-weight: 700;
+  line-height: 1.52;
+}
+
+.skill-block ul {
+  margin-top: 2.2mm;
+  padding-left: 4.2mm;
+}
+
+.skill-block li {
+  color: var(--body);
+  font-size: 7.75pt;
+  line-height: 1.55;
+  padding-left: 0.8mm;
+}
+
+.skill-block li + li {
+  margin-top: 0.9mm;
+}
+
+.skills-page .skill-block {
+  margin-top: 4.4mm;
+  padding-bottom: 3.8mm;
+}
+
+/* Projects (경력기술서) */
+.project {
+  margin-top: 7mm;
+}
+
+.company-line {
+  color: var(--accent);
+  font-size: 10pt;
+  font-weight: 800;
+}
+
+.project-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 5mm;
+  margin-top: 4mm;
+}
+
+.project-title h2 {
+  padding: 0;
+  border: 0;
+  font-size: 12.6pt;
+  line-height: 1.4;
+  font-weight: 800;
+}
+
+.project-title span {
+  flex: none;
+  color: var(--muted);
+  font-size: 7.8pt;
+  font-weight: 700;
+}
+
+.role {
+  margin-top: 2.7mm;
+  color: var(--body);
+  font-size: 7.8pt;
+  line-height: 1.68;
+}
+
+.block {
+  display: grid;
+  grid-template-columns: 21mm 1fr;
+  gap: 5.5mm;
+  margin-top: 4.4mm;
+}
+
+.block h3 {
+  color: var(--text);
+  font-size: 8.35pt;
+  font-weight: 800;
+  line-height: 1.6;
+}
+
+.block p,
+.block li {
+  color: var(--body);
+  font-size: 7.75pt;
+  line-height: 1.7;
+}
+
+.block p + p {
+  margin-top: 2.3mm;
+}
+
+.block ul {
+  padding-left: 4mm;
+}
+
+.block li + li {
+  margin-top: 1.3mm;
+}
+
+/* tech line — DESIGN.md: no filled box, no left border. Use a single top rule. */
+.tech {
+  margin-top: 4.2mm;
+  padding: 3mm 0 0;
+  border-top: 1px solid var(--line);
+  color: var(--body);
+  font-size: 7.55pt;
+  line-height: 1.62;
+}
+
+.simple-line {
+  margin-top: 3.8mm;
+  padding: 3.6mm 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--body);
+  font-size: 8pt;
+  line-height: 1.72;
+}
+
+.simple-line strong {
+  display: inline-block;
+  min-width: 28mm;
+}
+
+.language-list {
+  display: grid;
+  gap: 0;
+  margin-top: 3.8mm;
+}
+
+.language-item {
+  display: grid;
+  grid-template-columns: 32mm 1fr;
+  gap: 6mm;
+  align-items: center;
+  padding: 3.6mm 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.language-item strong {
+  display: block;
+  color: var(--text);
+  font-size: 8pt;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.language-item span {
+  display: block;
+  margin-top: 0.6mm;
+  color: var(--muted);
+  font-size: 7.8pt;
+  line-height: 1.45;
+}
+
+.language-item p {
+  color: var(--body);
+  font-size: 8pt;
+  line-height: 1.5;
+}
+
+footer {
+  position: absolute;
+  right: 18mm;
+  bottom: 8mm;
+  left: 18mm;
+  display: flex;
+  justify-content: space-between;
+  padding-top: 2.8mm;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 6.8pt;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  html,
+  body {
+    background: white;
+  }
+
+  body {
+    padding: 0;
+  }
+
+  main {
+    display: block;
+  }
+
+  .page {
+    box-shadow: none;
+    break-after: page;
+    page-break-after: always;
+  }
+
+  .page:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+}
+
+/* --- base-resume revision: merged page 1 & career role line --- */
+.core-item {
+  margin-top: 3.4mm;
+}
+.core-item h3 {
+  color: var(--text);
+  font-size: 8.7pt;
+  font-weight: 800;
+  line-height: 1.5;
+}
+.core-item .bullet-list {
+  margin-top: 1.1mm;
+}
+
+/* Last page: 학력 / 교육 / 자격증 / 어학 all as equal main titles
+   (match the page-head h1 look — 14.5pt + strong bottom rule). */
+.major-section {
+  margin-top: 9mm;
+}
+.major-section .major {
+  padding-bottom: 5mm;
+  border-bottom: 1px solid var(--line-strong);
+  font-size: 14.5pt;
+  line-height: 1.35;
+  font-weight: 700;
+  color: var(--text);
+}
+.major-section .record {
+  margin-top: 4.4mm;
+}
+
+.record .role-line {
+  color: var(--muted);
+  font-size: 8.2pt;
+  line-height: 1.5;
+  margin: 1mm 0 0;
+}
+
+/* =====================================================================
+   Review hardening (2026-07-25) — overflow safety, long-string wrapping,
+   flex min-width, readability bump. Print-first constraints kept:
+   fixed A4 .page height stays (footer is absolutely pinned; every render
+   is verified against an auto-height overflow check before shipping).
+   ===================================================================== */
+
+/* 2 · long unbreakable strings (URLs, tech tokens) may break when needed,
+   Korean still keep-all elsewhere */
+body { overflow-wrap: anywhere; }
+.contact-grid dd,
+.skill-stack,
+.tech,
+.role-line { overflow-wrap: anywhere; }
+
+/* 3 · flex title rows: let the title shrink instead of colliding w/ date */
+.name-row h2,
+.record-title h3,
+.project-title h2 { min-width: 0; overflow-wrap: anywhere; }
+.name-row { min-width: 0; }
+
+/* 4 · date/meta spans: tabular figures + a touch larger for legibility */
+.record-title span,
+.project-title span {
+  font-size: 8.2pt;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 5 · body & bullet readability — up from 7.55–7.8pt (still A4-dense) */
+.copy p,
+.meta p { font-size: 8.3pt; line-height: 1.74; }
+.first-page .copy p { font-size: 8.1pt; line-height: 1.68; }
+.achievement-list li,
+.bullet-list li { font-size: 8.2pt; line-height: 1.62; }
+.skill-block li { font-size: 8.1pt; line-height: 1.56; }
+.block p,
+.block li { font-size: 8.2pt; line-height: 1.66; }
+.block h3 { font-size: 8.6pt; }
+.record > p { font-size: 8.2pt; line-height: 1.68; }
+.tech { font-size: 8pt; line-height: 1.6; }
+.core-item h3 { font-size: 8.9pt; }
+
+/* 6 · footer: never let a long section label collide with the page number */
+footer { gap: 8mm; }
+footer span:first-child { min-width: 0; overflow-wrap: anywhere; }
+footer span:last-child { flex: none; font-variant-numeric: tabular-nums; }
+
+/* 7 · screen preview only: avoid clipped horizontal scroll on small windows */
+@media screen {
+  body { overflow-x: auto; }
+}
+
+/* =====================================================================
+   Layout hardening (2026-07-25 batch 2) — visual hierarchy, robust
+   title/date alignment, project label column, last-page consistency.
+   ===================================================================== */
+
+/* #4 · title ↔ date: grid so a long title wraps instead of shoving the
+   date off; the date column keeps its own width and top baseline. */
+.record-title,
+.project-title {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 8mm;
+}
+.record-title span,
+.project-title span { align-self: start; }
+
+/* #3 · project label column slightly wider, labels top-aligned, uniform
+   body start line across every block. */
+.block {
+  grid-template-columns: 24mm 1fr;
+  column-gap: 5mm;
+  align-items: start;
+}
+
+/* #2 · clearer heading hierarchy — section titles get a MEDIUM rule
+   (between the page header's strong rule and the project title's none). */
+.section h2 { border-bottom-color: var(--line); }
+
+/* #7 · last page: 학력·교육·자격증·어학 are four EQUAL section titles
+   under one neutral page header — not page-strength, so they don't
+   outweigh the résumé's real section/project titles. */
+.plain-head h1 { color: var(--body); font-weight: 700; }
+.major-section { margin-top: 7.5mm; }
+.major-section .major {
+  padding-bottom: 2.4mm;
+  border-bottom: 1px solid var(--line);
+  font-size: 13.2pt;
+  line-height: 1.35;
+  font-weight: 700;
+  color: var(--text);
+}
+.major-section .record { margin-top: 3.6mm; }
+
+/* #1 · first page — give 핵심 성과 a clearer break from 요약 (its own
+   breathing room above the section rule). */
+.first-page .section + .section { margin-top: 8mm; }
+
+/* #5 · density balance — the two dense 경력기술서 pages (6 실행 + 5 성과)
+   run close to the footer at 8.2pt; ease block body a hair and widen the
+   page's bottom safety margin so no page crowds the footer rule. */
+.page { padding-bottom: 18mm; }
+.block p,
+.block li { font-size: 8.05pt; line-height: 1.62; }
+
+/* =====================================================================
+   2026-07-27 rewrite — section reorder (경력기술서 now precedes 기술),
+   3-tier 핵심 성과 (title → chip line → evidence line), spec-style 경력
+   bullets with de-emphasized stack parens, and a 10-row 2-col 기술 table
+   given a full page. No new colors/typefaces/radii — reuses existing
+   tokens (--text/--body/--muted/--line) per DESIGN.md.
+   ===================================================================== */
+
+/* 핵심 성과: title → chip line (scan labels, light) → evidence (→ marker,
+   bold signature numbers). Replaces the old title+bullet-list pattern. */
+.core-item { margin-top: 4.4mm; }
+.core-item h3 {
+  color: var(--text);
+  font-size: 9.6pt;
+  font-weight: 800;
+  line-height: 1.5;
+}
+/* Chip line is the primary content of a 핵심 성과 item: same size as the
+   evidence line, primary ink, tracked out so the `·` separators read as
+   structure. The evidence line supports it — same size, secondary ink,
+   hanging `→` marker — so the 800-weight signature numbers inside it are
+   the only spots that jump. (2026-07-27 소유자 지시: 제목 외 크기 통일) */
+.core-chips {
+  margin-top: 1.3mm;
+  color: var(--text);
+  font-size: 8.3pt;
+  font-weight: 400;
+  letter-spacing: 0.3px;
+  line-height: 1.6;
+}
+.core-evidence {
+  margin-top: 2.2mm;
+  padding-left: 4.4mm;
+  text-indent: -4.4mm;   /* hanging: `→` sits in the gutter, wrapped lines
+                            align under the text, not under the arrow */
+  color: var(--body);
+  font-size: 8.3pt;
+  font-weight: 400;
+  line-height: 1.66;
+}
+.core-evidence strong {
+  color: var(--text);
+  font-weight: 800;
+}
+
+/* 경력: spec-style bullets — parenthetical stack inventories render lighter
+   than the surrounding sentence so the sentence itself scans first. */
+.career-section .bullet-list { margin-top: 3mm; }
+.stack-paren {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 0.95em;
+}
+
+/* 기술: 10-row 2-col table given a full page. Left column = category
+   label (bold, narrow fixed width), right column = tool inventory
+   (center-dot separated). Rule-based row separation only, no fills. */
+.skills-table-section { margin-top: 8mm; }
+.skills-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.skills-table tr {
+  border-bottom: 1px solid var(--line);
+}
+.skills-table tr:last-child {
+  border-bottom: 0;
+}
+.skills-table th,
+.skills-table td {
+  text-align: left;
+  vertical-align: middle;
+  padding: 8.5mm 0;
+  font-weight: 400;
+}
+.skills-table th {
+  width: 40mm;
+  color: var(--text);
+  font-size: 9.6pt;
+  font-weight: 800;
+  line-height: 1.5;
+  padding-right: 6mm;
+}
+.skills-table td {
+  color: var(--body);
+  font-size: 9pt;
+  font-weight: 700;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+/* =====================================================================
+   2026-07-27 emphasis rebalance — ink 3-tier system (DESIGN.md Typography
+   > Emphasis, C-03 강조 배분). The reference draft was measured at 0 bolds
+   on the 경력 page and 8~12 on 경력기술서 pages, but every one of those was
+   a bullet-head label — uniform bold reads as no bold. base-resume.md now
+   marks two different things with the same md `**...**` syntax: the
+   bullet-head label ("실사용 서비스 전환 —") and the load-bearing metric/
+   judgment phrase inside the sentence. They must render as two different
+   ink tiers, not one:
+
+     body      400 / var(--body) / var(--text) default prose
+     label     700 / var(--body)   — bullet-head or "기술:" structural marker
+     emphasis  800 / var(--text)   — budgeted W1/W2 emphasis (default `strong`)
+
+   Two axes (weight AND tone) are mandatory, not decorative: the declared
+   Noto Sans KR isn't installed on the authoring machine, so Chrome embeds
+   AppleSDGothicNeo Regular/Bold/ExtraBold in the PDF and 700 vs 800 render
+   as distinct faces there — but the fallback Malgun Gothic ships only
+   Regular/Bold, so on Windows the weight axis collapses to two tiers and
+   the tone difference is what keeps the label readable. Never drop the
+   tone axis even if weight alone looks sufficient on this machine.
+
+   A "label" is structurally identified, not content-identified: any
+   <strong> that opens a <li> (the bullet-head pattern) or opens the
+   ".tech" 기술: line is a label; every other <strong> (mid-sentence, or
+   inside .core-evidence / .stack-paren) keeps the emphasis-tier default
+   declared on the bare `strong` selector above. This selector's higher
+   specificity (element+pseudo-class) wins over the plain `strong` rule
+   without needing a !important or new markup/class.
+
+   Superseded 2026-07-27 (later same day, owner instruction): the "4~6 per
+   page" budget and the 67→26 count above are retired — the owner now wants
+   bold read densely enough that the <strong> runs alone summarize the page
+   ("볼드만 읽어도 요약이 되게"). base-resume.md carries ~60 emphasis marks
+   across the document; this ink-tier CSS (label 700/body vs emphasis
+   800/text) is unchanged and still does the job — only the per-page count
+   ceiling is gone. Do not re-trim bold to hit the old ceiling. */
+li > strong:first-child,
+p.tech > strong:first-child {
+  color: var(--body);
+  font-weight: 700;
+}
+
+/* 기술 표 좌열 카테고리 — 강조가 아니라 구조 라벨(W4). 8개 카테고리 모두
+   진하게(800/text) 두면 "8개가 전부 강조됐다"는 착시가 생기므로 라벨
+   티어로 낮춘다. 열 구조 자체가 이미 스캔 경로를 제공한다(강조 예산 0). */
+.skills-table th {
+  color: var(--body);
+  font-weight: 700;
+}
+
+/* =====================================================================
+   2026-07-27 경력기술서 불릿 2줄 구조 (소유자 지시 — "—" 구분자 폐기).
+   라벨 tier(700 + var(--body))는 위 li > strong:first-child 규칙이 이미
+   부여한다; 여기서는 .block(경력기술서 [주요 실행]/[성과]) 안에서만
+   그 라벨을 자기 줄로 내려 라벨 → 내용 2줄 구조를 만든다. 경력(2페이지)
+   .bullet-list는 한 줄 명세형을 유지해야 하므로 이 규칙에서 제외
+   (선택자를 .block으로 한정). */
+.block li > strong:first-child {
+  display: block;
+  margin-bottom: 1mm;
+}
+
+/* 1-page visual fill — keep the existing content, use the available paper
+   more deliberately instead of adding more sections. */
+.first-page {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding-top: 18mm;
+  padding-bottom: 17mm;
+}
+
+.first-page .top-title {
+  padding-bottom: 4.5mm;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.first-page .top-title h1 {
+  font-size: 20pt;
+  line-height: 1.25;
+}
+
+.first-page .info-box {
+  min-height: 38mm;
+  margin-top: 4.5mm;
+}
+
+.first-page .photo {
+  height: 38mm;
+}
+
+.first-page .personal {
+  padding-top: 4.5mm;
+  padding-bottom: 4.5mm;
+}
+
+.first-page .name-row h2 {
+  font-size: 13.5pt;
+}
+
+.first-page .contact-grid {
+  margin-top: 4.8mm;
+  font-size: 7.8pt;
+  line-height: 1.45;
+}
+
+.first-page .contact-grid dd.wide {
+  grid-column: auto;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.first-page > .section {
+  margin-top: 9mm;
+}
+
+.first-page > .section + .section {
+  margin-top: 10.5mm;
+}
+
+.first-page > .section > h2 {
+  padding-bottom: 2.4mm;
+  font-size: 13.2pt;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.first-page .copy {
+  margin-top: 3.4mm;
+}
+
+.first-page .copy p {
+  font-size: 8.2pt;
+  line-height: 1.7;
+}
+
+.first-page .core-item {
+  margin-top: 4.4mm;
+}
+
+.first-page .core-item h3 {
+  font-size: 9.6pt;
+  line-height: 1.5;
+}
+
+.first-page .core-chips,
+.first-page .core-evidence {
+  font-size: 8.3pt;
+  line-height: 1.6;
+}
+
+.first-page .core-evidence {
+  margin-top: 2.2mm;
+}
