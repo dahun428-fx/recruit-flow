@@ -114,6 +114,7 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
   const addEdge = useCanvasStore((s) => s.addEdge);
   const removeEdge = useCanvasStore((s) => s.removeEdge);
   const select = useCanvasStore((s) => s.select);
+  const renameNode = useCanvasStore((s) => s.renameNode);
   const updateAgentMounts = useCanvasStore((s) => s.updateAgentMounts);
 
   const rf = useReactFlow();
@@ -137,6 +138,10 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
   const [edgeContextMenu, setEdgeContextMenu] = useState<EdgeContextMenu | null>(null);
   // 캔버스 빈 바탕 우클릭 메뉴(자동정렬 등).
   const [paneContextMenu, setPaneContextMenu] = useState<{ x: number; y: number } | null>(null);
+  // 노드 인라인 이름 변경(커서 위치 입력창).
+  const [renamingNode, setRenamingNode] = useState<
+    { nodeId: string; x: number; y: number; value: string } | null
+  >(null);
   const [partialRunning, setPartialRunning] = useState(false);
   const [partialError, setPartialError] = useState<string | null>(null);
 
@@ -497,6 +502,60 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
     scheduleSave();
   }, [contextMenu, removeNode, scheduleSave]);
 
+  // ── 상세보기 ── 더블클릭과 동일하게 상세 탭(참조→정의, 맨손→노드 편집) 열기.
+  const handleOpenDetail = useCallback(() => {
+    if (!contextMenu) return;
+    const n = nodes.find((x) => x.id === contextMenu.nodeId);
+    onNodeClick?.(contextMenu.nodeId, n?.blockDefId ?? null);
+    setContextMenu(null);
+  }, [contextMenu, nodes, onNodeClick]);
+
+  // ── 복제 ── 같은 type/config/blockDefId, 새 id·오프셋 위치·고유 이름("… 복사"),
+  //   엣지는 복사하지 않는다(store.addNode가 새 노드를 선택).
+  const handleDuplicateNode = useCallback(() => {
+    if (!contextMenu) return;
+    const src = nodes.find((x) => x.id === contextMenu.nodeId);
+    if (!src) return;
+    const names = new Set(nodes.map((n) => n.name));
+    let name = `${src.name} 복사`;
+    for (let i = 2; names.has(name); i++) name = `${src.name} 복사 ${i}`;
+    const dup: NodeRow = {
+      ...src,
+      id: nanoid(),
+      name,
+      positionX: src.positionX + 40,
+      positionY: src.positionY + 40,
+      config: structuredClone(src.config),
+    };
+    addNode(dup);
+    setContextMenu(null);
+    scheduleSave();
+  }, [contextMenu, nodes, addNode, scheduleSave]);
+
+  // ── 이름 변경 ── 커서 위치에 인라인 입력창을 연다(Enter 저장/Esc 취소).
+  const handleStartRename = useCallback(() => {
+    if (!contextMenu) return;
+    const n = nodes.find((x) => x.id === contextMenu.nodeId);
+    if (!n) return;
+    setRenamingNode({
+      nodeId: contextMenu.nodeId,
+      x: contextMenu.x,
+      y: contextMenu.y,
+      value: n.name,
+    });
+    setContextMenu(null);
+  }, [contextMenu, nodes]);
+
+  const commitRename = useCallback(() => {
+    if (!renamingNode) return;
+    const v = renamingNode.value.trim();
+    if (v) {
+      renameNode(renamingNode.nodeId, v);
+      scheduleSave();
+    }
+    setRenamingNode(null);
+  }, [renamingNode, renameNode, scheduleSave]);
+
   // ── 자동정렬 ──
   const handleAutoLayout = useCallback(() => {
     if (readOnly) return;
@@ -685,12 +744,28 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
           onMouseDown={(e) => e.stopPropagation()}
         >
           <button
+            onClick={handleOpenDetail}
+            data-tip="이 노드의 상세(정의/편집) 탭을 엽니다. 더블클릭과 동일"
+          >
+            상세보기
+          </button>
+          <button onClick={handleStartRename} data-tip="노드 이름을 바꿉니다">
+            이름 변경
+          </button>
+          <button
+            onClick={handleDuplicateNode}
+            data-tip="같은 설정으로 노드를 복제합니다(연결선은 복사 안 함)"
+          >
+            복제
+          </button>
+          <button
             onClick={startPartialRun}
             disabled={partialRunning}
             data-tip="이 노드부터 하류만 재실행. 상류 아티팩트는 직전 완료 run에서 복사합니다"
           >
             {partialRunning ? "재실행 중…" : "이 노드부터 재실행"}
           </button>
+          <div className={styles.menuDivider} />
           <button
             onClick={handleRemoveNode}
             data-tip="이 노드를 캔버스에서 제거합니다(연결선도 함께 삭제)"
@@ -732,6 +807,24 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
             자동정렬
           </button>
         </div>
+      )}
+
+      {renamingNode && (
+        <input
+          className={styles.renameInput}
+          style={{ left: renamingNode.x, top: renamingNode.y }}
+          autoFocus
+          value={renamingNode.value}
+          onChange={(e) =>
+            setRenamingNode((r) => (r ? { ...r, value: e.target.value } : r))
+          }
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commitRename();
+            else if (e.key === "Escape") setRenamingNode(null);
+          }}
+          onBlur={commitRename}
+          onMouseDown={(e) => e.stopPropagation()}
+        />
       )}
     </div>
   );

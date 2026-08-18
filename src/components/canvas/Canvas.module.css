@@ -133,3 +133,28 @@
   opacity: 0.4;
   cursor: default;
 }
+
+/* 컨텍스트 메뉴 구분선(파괴적 항목 분리) */
+.menuDivider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 2px;
+}
+
+/* 노드 인라인 이름 변경 입력창(커서 위치 고정) */
+.renameInput {
+  position: fixed;
+  z-index: 210;
+  min-width: 150px;
+  border: 1px solid var(--c-agent);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 12.5px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 4px 16px rgba(15, 22, 40, 0.18);
+}
+.renameInput:focus {
+  outline: none;
+}
