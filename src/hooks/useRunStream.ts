@@ -80,12 +80,13 @@ export function useRunStream(runId: string | null, pipelineId: string | null) {
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-    async function loadState(): Promise<{
-      state: RunState;
-      cursor: number;
-    } | null> {
+    // 404는 "이 run은 없어졌다"(DB 리셋·owner 불일치)는 영구 신호 → 재시도 없이
+    // 활성 run을 비우고 루프를 끊는다. null은 일시적 실패(오프라인 등) → 재시도.
+    type Snapshot = { state: RunState; cursor: number };
+    async function loadState(): Promise<Snapshot | "gone" | null> {
       try {
         const res = await fetch(`/api/runs/${runId}`);
+        if (res.status === 404) return "gone";
         if (!res.ok) return null;
         const cursor = Number(res.headers.get("X-Stream-Cursor") ?? "0");
         return {
@@ -97,9 +98,27 @@ export function useRunStream(runId: string | null, pipelineId: string | null) {
       }
     }
 
+    // run이 영구히 사라졌을 때: 재연결 타이머를 끊고 구독을 닫고
+    // localStorage의 활성 run을 비운다. cancelled로 표시해 이후 async 콜백도 정지.
+    function giveUp() {
+      cancelled = true;
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      esRef.current?.close();
+      esRef.current = null;
+      if (pipelineId) rememberActiveRun(pipelineId, null);
+    }
+
     async function refetchAndFinalize() {
       const snapshot = await loadState();
-      if (cancelled || !snapshot) return;
+      if (cancelled) return;
+      if (snapshot === "gone") {
+        giveUp();
+        return;
+      }
+      if (!snapshot) return;
       initRun(toRunView(snapshot.state));
     }
 
@@ -189,6 +208,11 @@ export function useRunStream(runId: string | null, pipelineId: string | null) {
         if (cancelled) return;
         void loadState().then((snapshot) => {
           if (cancelled) return;
+          // run이 사라졌으면(404) 무한 재연결하지 않고 정리한다.
+          if (snapshot === "gone") {
+            giveUp();
+            return;
+          }
           // 완전 오프라인이면 REST도 함께 실패한다. 이 경우에도 재시도해야
           // 네트워크 복구 뒤 새 SSE + 스냅샷으로 돌아올 수 있다.
           if (!snapshot) {
@@ -210,6 +234,10 @@ export function useRunStream(runId: string | null, pipelineId: string | null) {
       async function applySnapshot() {
         const snapshot = await loadState();
         if (cancelled || esRef.current !== es) return;
+        if (snapshot === "gone") {
+          giveUp();
+          return;
+        }
         if (!snapshot) {
           const buffered = pending ?? [];
           pending = null;
