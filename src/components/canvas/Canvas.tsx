@@ -135,6 +135,8 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
 
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [edgeContextMenu, setEdgeContextMenu] = useState<EdgeContextMenu | null>(null);
+  // 캔버스 빈 바탕 우클릭 메뉴(자동정렬 등).
+  const [paneContextMenu, setPaneContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [partialRunning, setPartialRunning] = useState(false);
   const [partialError, setPartialError] = useState<string | null>(null);
 
@@ -443,6 +445,7 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
       if (!execNode) return;
       if ((MOUNT_NODE_TYPES as string[]).includes(execNode.type)) return;
       setEdgeContextMenu(null); // 엣지 메뉴 닫기
+      setPaneContextMenu(null); // 바탕 메뉴 닫기
       setContextMenu({ nodeId: node.id, x: e.clientX, y: e.clientY });
     },
     [nodes],
@@ -453,9 +456,22 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
     (e: React.MouseEvent, edge: Edge) => {
       e.preventDefault();
       setContextMenu(null); // 노드 메뉴 닫기
+      setPaneContextMenu(null); // 바탕 메뉴 닫기
       setEdgeContextMenu({ edgeId: edge.id, x: e.clientX, y: e.clientY });
     },
     [],
+  );
+
+  // ── 캔버스 빈 바탕 우클릭 → 자동정렬 등 메뉴 ──
+  const onPaneContextMenu = useCallback(
+    (e: React.MouseEvent | MouseEvent) => {
+      if (readOnly) return;
+      e.preventDefault();
+      setContextMenu(null);
+      setEdgeContextMenu(null);
+      setPaneContextMenu({ x: e.clientX, y: e.clientY });
+    },
+    [readOnly],
   );
 
   const handleDeleteEdge = useCallback(() => {
@@ -618,6 +634,8 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
         onPaneClick={() => {
           select(null);
           setContextMenu(null);
+          setEdgeContextMenu(null);
+          setPaneContextMenu(null);
         }}
         onNodeClick={(_, n) => {
           select(n.id);
@@ -625,6 +643,7 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
         }}
         onNodeContextMenu={readOnly ? undefined : onNodeContextMenu}
         onEdgeContextMenu={readOnly ? undefined : onEdgeContextMenu}
+        onPaneContextMenu={readOnly ? undefined : onPaneContextMenu}
         fitView
         // 더블클릭은 노드 상세 열기용(FlowNode.onDoubleClick) — 캔버스 줌과 충돌하지
         // 않게 ReactFlow의 더블클릭 줌을 끈다. 줌은 컨트롤·휠로.
@@ -684,6 +703,25 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
             data-tip="이 연결선을 삭제합니다"
           >
             선 삭제
+          </button>
+        </div>
+      )}
+
+      {paneContextMenu && (
+        <div
+          className={styles.contextMenu}
+          style={{ left: paneContextMenu.x, top: paneContextMenu.y }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={() => {
+              handleAutoLayout();
+              setPaneContextMenu(null);
+            }}
+            disabled={readOnly}
+            data-tip="노드를 흐름 순서대로 자동 정렬합니다"
+          >
+            자동정렬
           </button>
         </div>
       )}
