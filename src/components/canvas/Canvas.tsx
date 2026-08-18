@@ -465,6 +465,14 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
     scheduleSave();
   }, [edgeContextMenu, removeEdge, scheduleSave]);
 
+  // ── 노드 우클릭 → "노드 제거" ── removeNode가 연결 엣지·선택도 함께 정리(store).
+  const handleRemoveNode = useCallback(() => {
+    if (!contextMenu) return;
+    removeNode(contextMenu.nodeId);
+    setContextMenu(null);
+    scheduleSave();
+  }, [contextMenu, removeNode, scheduleSave]);
+
   // ── 자동정렬 ──
   const handleAutoLayout = useCallback(() => {
     if (readOnly) return;
@@ -655,6 +663,12 @@ export function Canvas({ onDownload, onHumanClick, readOnly, onTrayDrop, onNodeC
             data-tip="이 노드부터 하류만 재실행. 상류 아티팩트는 직전 완료 run에서 복사합니다"
           >
             {partialRunning ? "재실행 중…" : "이 노드부터 재실행"}
+          </button>
+          <button
+            onClick={handleRemoveNode}
+            data-tip="이 노드를 캔버스에서 제거합니다(연결선도 함께 삭제)"
+          >
+            노드 제거
           </button>
         </div>
       )}
