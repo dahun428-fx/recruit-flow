@@ -227,6 +227,9 @@ export const STARTER_BLOCK_DEFS: CatalogBlockDef[] = [
       }),
       mounts: [
         { blockDefId: "__slug:canonical:skill:screen-profiles" },
+        // 지원자 프로필 조회(연차·헤드라인 sanity check)용 도구
+        { blockDefId: "__slug:canonical:tool:get_document" },
+        { blockDefId: "__slug:canonical:tool:search_documents" },
       ],
     },
   },
@@ -247,6 +250,9 @@ export const STARTER_BLOCK_DEFS: CatalogBlockDef[] = [
       }),
       mounts: [
         { blockDefId: "__slug:canonical:skill:screen-profiles" },
+        // 지표 레지스트리 대조·경험 뱅크 깊이 판단용 도구
+        { blockDefId: "__slug:canonical:tool:get_document" },
+        { blockDefId: "__slug:canonical:tool:search_documents" },
       ],
     },
   },
@@ -431,9 +437,12 @@ export const STARTER_PIPELINE: CatalogPipeline = {
     { sourceNodeName: "지원자 프로필", targetNodeName: "writer",          kind: "flow", sourceHandle: null, inputOrder: 1 },
     { sourceNodeName: "경험 뱅크",    targetNodeName: "writer",          kind: "flow", sourceHandle: null, inputOrder: 2 },
 
-    // writer → 채점기 2개 (초안 입력)
+    // writer(초안) + 현재 JD(타겟 직무) → 채점기 2개
+    // 채점기는 초안뿐 아니라 JD를 봐야 "타겟 직무 적합"을 판정할 수 있다.
     { sourceNodeName: "writer",        targetNodeName: "recruiter-screen", kind: "flow", sourceHandle: null, inputOrder: 0 },
+    { sourceNodeName: "현재 JD",       targetNodeName: "recruiter-screen", kind: "flow", sourceHandle: null, inputOrder: 1 },
     { sourceNodeName: "writer",        targetNodeName: "tech-screen",      kind: "flow", sourceHandle: null, inputOrder: 0 },
+    { sourceNodeName: "현재 JD",       targetNodeName: "tech-screen",      kind: "flow", sourceHandle: null, inputOrder: 1 },
 
     // writer + 채점기 2개 → 관문 (초안 passthrough + JSON 채점)
     { sourceNodeName: "writer",        targetNodeName: "관문",            kind: "flow", sourceHandle: null, inputOrder: 0 },
