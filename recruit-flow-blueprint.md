@@ -22,13 +22,13 @@ HTML. LLM 챗봇은 블록을 만들어 주고, 조립은 사람이 한다.
 | # | 결정 | 내용 |
 | --- | --- | --- |
 | 1 | 목적 | **실사용 도구** (포트폴리오는 부산물). 핵심 가치는 "UI로 파이프라인을 쉽게 조립" |
-| 2 | 실행 백엔드 | **Claude Agent SDK (TypeScript)**. 구독 인증 재사용. 노드 단위 SDK 호출로 상태 표시·부분 재실행 가능 |
+| 2 | 실행 백엔드 | **Claude Agent SDK (TypeScript)**. 구독 인증 재사용. 노드 단위 SDK 호출로 상태 표시·부분 재실행 가능. **개정 예고(재플랫폼 SG-2)**: 멀티유저 전환 시 사용자별 BYO Anthropic 키 — Phase 4 구현, 그 전까지 코드는 원안(구독 인증) 유지([specs/replatform-plan.md](specs/replatform-plan.md)) |
 | 3 | 에이전트 정의 위치 | `.claude/agents` 밖으로 완전 이관 — 앱 DB가 소유, 실행 시 `query()` `agents` 옵션으로 주입 |
 | 4 | 노드 2계층 | **실행 계층**(에이전트/자료/완성본/관문/내 검토, 실선 엣지=데이터 흐름) + **장착 계층**(기술/규칙/도구, 에이전트 카드 칩으로 표현 — M4 재설계(2026-08-15)). 병렬은 노드가 아니라 엣지 규칙(분기=병렬, 합류=join). 규칙 정의 1개를 여러 에이전트에 공유 장착 가능 |
 | 5 | 챗봇 권한 | **add만**. 챗봇이 만든 블록은 파일 탐색기의 "새 블록 트레이"에 담기고, 사람이 드래그·배선하는 순간이 승인. 그래프 배선·삭제·수정은 사람 전용. `edit_document` tool로 문서 부분 치환 허용(M4 신규, 결정 6) |
 | 6 | 데이터 흐름 | 노드 실행 1회 = 아티팩트 1개(DB 행, `run_id`+`node_id`+내용). 형태는 마크다운(산문) 또는 구조화 JSON(점수·PASS/FAIL — 채점 에이전트는 JSON 스키마 강제). 관문 조건식은 LLM 없이 코드로 평가. 노드 클릭 → 중앙 탭 에디터 아티팩트 탭에서 열람·스트리밍·(내 검토 노드) 직접 편집 |
-| 7 | 저장소 | **전부 DB (SQLite + Drizzle)**. 증거 베이스 포함 완전 이관, my-recruit은 읽기 전용 아카이브. `document_versions` 버전 테이블 필수(변경 전문·시각·주체 사람/LLM). 에이전트는 `get_document(id)`/`search_documents` tool로 접근, 프롬프트에 doc id 포인터 |
-| 8 | 스택 | 로컬 웹앱. **Next.js(App Router) + React Flow(@xyflow/react) + SQLite/Drizzle + Zustand + SSE**. 러너는 Next 서버 프로세스 내 인메모리 큐 + 백그라운드 루프, run 상태는 DB에 기록(새로고침 복원). 워커 분리는 v2 |
+| 7 | 저장소 | **전부 DB (Drizzle — 방언은 결정 8 참조)**. 증거 베이스 포함 완전 이관, my-recruit은 읽기 전용 아카이브. `document_versions` 버전 테이블 필수(변경 전문·시각·주체 사람/LLM). 에이전트는 `get_document(id)`/`search_documents` tool로 접근, 프롬프트에 doc id 포인터 |
+| 8 | 스택 | 로컬 웹앱. **Next.js(App Router) + React Flow(@xyflow/react) + Postgres(postgres.js)/Drizzle + Zustand + SSE** — ~~SQLite~~는 재플랫폼 Phase 1(2026-08-16)에서 Postgres로 개정(RLS 2차 방어는 Phase 2a, [specs/replatform-plan.md](specs/replatform-plan.md)). 러너는 Next 서버 프로세스 내 인메모리 큐 + 백그라운드 루프, run 상태는 DB에 기록(새로고침 복원). 워커 분리는 v2 |
 | 9 | 상호작용 | **챗봇 상주 패널 단일화(M4 재설계(2026-08-15))**: 기존 하단 채팅 독 → 우측 상주 패널. 블록 제작 대화 + 내 검토 노드 카드(승인/갭 인터뷰/관문 실패 보고)가 한 채팅 스트림에. 캔버스 내 검토 노드는 점멸로 대기 표시, 클릭 시 해당 카드로 스크롤. 아티팩트 전문은 채팅이 아닌 중앙 탭 에디터 아티팩트 탭 |
 | 9b | 실행 모델 | 채팅 = 사령탑(JD·문서 등록, 블록 add, "작성해줘" = 실행 트리거). **run 시작 시 그래프 스냅샷** — 실행 중 편집은 다음 run에 반영. 인터랙티브 vs 파이어-앤-포겟은 그래프에 내 검토 노드를 넣었는지가 결정. 갭 인터뷰는 에이전트 노드 속성: "갭 발견 시 멈추고 묻기 / `[확인 필요]` 표시하고 계속". **JD 교체 루프(M5, 워크스트림 A)**: JD 입력 노드는 안정적 이름 문서(`현재 JD`)를 참조, 새 JD는 이름 upsert로 내용만 갱신 → 재배선 없이 다음 run이 최신 JD 사용(nodes.md §3) |
 | 10 | 산출물 | **코드 템플릿 렌더링**(LLM 아님): 최종 마크다운 → 결정론적 변환 → HTML/CSS 템플릿(1~2종, DESIGN.md 스타일 이식). 자기완결형 HTML 1파일 다운로드. PDF는 사용자가 브라우저 인쇄로 변환 — 템플릿에 `@media print`·페이지 넘김 보장은 앱 책임. 서버 PDF(Playwright) 없음 |

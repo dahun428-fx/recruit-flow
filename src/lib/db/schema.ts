@@ -75,7 +75,8 @@ export const edges = pgTable("edges", {
     .references(() => pipelines.id, { onDelete: "cascade" }),
   sourceNodeId: text("source_node_id").notNull(),
   targetNodeId: text("target_node_id").notNull(),
-  // flow(실선) / mount(점선)
+  // flow(실선). "mount"는 M4에서 Agent config.mounts 칩으로 대체된 레거시 값 —
+  // 캔버스 렌더·자동정렬·검증에서 제외되며 신규 생성 경로 없음.
   kind: text("kind").notNull(),
   // Gate만 pass/fail
   sourceHandle: text("source_handle"),

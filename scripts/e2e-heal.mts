@@ -13,7 +13,7 @@
 //  - 커밋 전 재검증 게이트: typecheck + smoke(73+38) + e2e 전부 통과해야 커밋.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const ROOT = process.cwd();
@@ -168,7 +168,7 @@ function guardForbidden(): string[] {
     (f) =>
       f.startsWith("specs/") ||
       f.startsWith("drizzle/") ||
-      f.startsWith("scripts/smoke-") ||
+      f.startsWith("scripts/unit-tests") ||
       f === "playwright.config.ts" ||
       f === "playwright.live.config.ts" ||
       f.startsWith("e2e/support/"),
@@ -177,35 +177,18 @@ function guardForbidden(): string[] {
   return forbidden;
 }
 
-function smoke(name: string): boolean {
-  const dbp = path.join(ROOT, "tmp", `heal-${name}.db`);
-  const r = run(NODE, [TSX_CLI, `scripts/smoke-${name}.mts`], {
-    env: { RECRUIT_FLOW_DB_PATH: dbp },
-  });
-  for (const suf of ["", "-wal", "-shm"]) {
-    try {
-      rmSync(dbp + suf);
-    } catch {
-      /* noop */
-    }
-  }
-  return r.status === 0 && /FAIL 0/.test(r.stdout);
-}
-
 function reverify(): boolean {
   if (run(NODE, ["node_modules/typescript/bin/tsc", "--noEmit"]).status !== 0) {
     console.log("  ✗ 재검증: typecheck 실패");
     return false;
   }
-  if (!smoke("engine")) {
-    console.log("  ✗ 재검증: smoke-engine 실패");
+  // 단위 테스트(순수 로직 — gate 파서·JSON 재시도 등). 스모크 2종은 pg 전환으로
+  // 2026-08-23 공식 폐기(감사 R1) — 행동 경로는 e2e 34건, 순수 로직은 이 게이트가 담당.
+  if (run(NODE, [TSX_CLI, "scripts/unit-tests.mts"]).status !== 0) {
+    console.log("  ✗ 재검증: unit-tests 실패");
     return false;
   }
-  if (!smoke("chat")) {
-    console.log("  ✗ 재검증: smoke-chat 실패");
-    return false;
-  }
-  // e2e는 직전 루프에서 green 확인됨(중복 실행 생략). typecheck+smoke만 추가 게이트.
+  // e2e는 직전 루프에서 green 확인됨(중복 실행 생략). typecheck+unit만 추가 게이트.
   return true;
 }
 

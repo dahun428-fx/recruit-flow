@@ -91,21 +91,26 @@ Next 서버 프로세스 내 싱글턴, 인메모리 큐 + 이벤트 구동 루�
 UI는 항상 완전한 그래프를 전송하므로 영향받지 않는다. 이 검증은 API를
 직접 호출하는 경로(스크립트·curl·임포터)를 위한 것이다.
 
-### 챗봇 tool 목록 (M3)
+### 챗봇 tool 목록 (M3 기반, M5 확장 — 9종)
 
-챗봇(`runChat`)이 사용하는 tool 전체 목록:
+챗봇(`runChat`)이 사용하는 tool 전체 목록(2026-08-23 실구현 정합화 —
+`chat-tools.ts`의 읽기 5종 + 쓰기 4종):
 
-| tool | 설명 |
-| --- | --- |
-| `add_block` | 팔레트 새 블록 트레이에 블록 추가(결정 5). 그래프 배선 불가 |
-| `register_document` | 문서 라이브러리에 새 문서 등록 |
-| `trigger_run` | 파이프라인 run 시작 트리거 |
-| `get_document` | 문서 id로 전문 조회(읽기) |
-| `search_documents` | 키워드로 문서 검색(읽기) |
-| `edit_document` | 문서 부분 치환(쓰기, M4 신규). `{name, old_string, new_string}`. 매치가 정확히 1개여야 성공 — 0개·2개+면 에러 반환. 성공할 때마다 새 버전 생성(author=llm). |
+| tool | 구분 | 설명 |
+| --- | --- | --- |
+| `list_block_defs` | 읽기 | 팔레트 정의 목록 조회 |
+| `get_graph` | 읽기 | 현재 그래프 요약 조회(결정 G — 요약만) |
+| `list_documents` | 읽기 | 문서 라이브러리 목록 조회 |
+| `get_document` | 읽기 | 문서 id로 전문 조회 |
+| `check_jd_coverage` | 읽기 | JD↔증거베이스 요건 커버리지 사전점검(M5 C-3, code-reviewer 결정 5 게이트 통과) |
+| `add_block` | 쓰기 | 팔레트 새 블록 트레이에 추가(결정 5). 그래프 배선 불가 |
+| `register_document` | 쓰기 | 문서 등록(이름 upsert = 같은 이름이면 새 버전) |
+| `edit_document` | 쓰기 | 문서 부분 치환(M4). `{name, old_string, new_string}`. 매치가 정확히 1개여야 성공 — 0개·2개+면 에러. 성공마다 새 버전(author=llm) |
+| `trigger_run` | 쓰기 | 파이프라인 run 시작 트리거 |
 
-`get_document`·`search_documents`·`edit_document`는 챗봇 tool이며
-Agent 장착 도구(Tool 칩)와는 별개다(nodes.md §7).
+챗봇 tool과 Agent 장착 도구(Tool 칩: `get_document`·`search_documents`,
+nodes.md §7)는 **별개 집합**이다 — `search_documents`는 Agent 장착 전용이며
+챗봇에는 없다(챗봇의 문서 탐색은 `list_documents`+`get_document`로).
 
 **JD 교체 루프 (M5, 워크스트림 A)**: 사용자가 새 JD 텍스트를 주면 챗봇은
 `register_document(name="현재 JD", content=…)`(이름 upsert = 같은 이름이면
@@ -114,10 +119,8 @@ Agent 장착 도구(Tool 칩)와는 별개다(nodes.md §7).
 tool·재배선 없이 맞춤 이력서 run이 시작된다. 챗봇 시스템 프롬프트에 이
 이름 규약을 명시한다.
 
-**계획된 tool (M5, 워크스트림 C — tool 계약 변경, 승인 게이트 대기)**:
-`check_jd_coverage`(읽기) — JD와 증거베이스를 읽어 필수 요건 커버리지를
-요약, 직군 불일치를 "작성해줘" 전에 경고. 읽기 tool이라 결정 5(add-only)
-무위반. 구현은 code-reviewer 게이트(결정 5 회귀 검증) 통과 후.
+`check_jd_coverage`는 M5 C-3에서 code-reviewer 게이트(결정 5 회귀 검증)를
+거쳐 구현 완료 — 위 표 참조. 직군 불일치를 "작성해줘" 전에 경고한다.
 
 ## 3. SSE 이벤트
 

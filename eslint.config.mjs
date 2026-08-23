@@ -8,7 +8,6 @@ export default defineConfig([
   {
     files: [
       "src/components/canvas/PipelineView.tsx",
-      "src/components/documents/DocumentsView.tsx",
       "src/components/panel/SidePanel.tsx",
       "src/hooks/usePanelWidth.ts",
       "src/components/shell/FileExplorer.tsx",
@@ -43,5 +42,8 @@ export default defineConfig([
     "next-env.d.ts",
     "playwright-report/**",
     "test-results/**",
+    // 에이전트 격리 worktree 잔재 — 사본 파일 경로엔 위 오버라이드 glob이 안 맞아
+    // 가짜 에러를 만든다(2026-08-23 감사 lint 에러 17건의 전원인).
+    ".claude/**",
   ]),
 ]);

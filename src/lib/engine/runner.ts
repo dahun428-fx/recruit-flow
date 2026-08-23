@@ -87,8 +87,6 @@ interface RunControl {
   cancelled: boolean;
   /** 이 run 스케줄링 정지(waiting_human 중). */
   paused: boolean;
-  /** Gate fail로 폐기된(재실행 대상으로 무효화된) 키 — 결과 무시. */
-  invalidated: Set<NodeKey>;
   /**
    * Gate 라우팅 결정 — keyOf(gateId, iter) → "pass" | "fail".
    * pickReady가 Gate 상류의 pass/fail 엣지 하류를 열 때, 그 엣지의 sourceHandle이
@@ -247,7 +245,6 @@ class Runner {
       abort: new AbortController(),
       cancelled: false,
       paused: false,
-      invalidated: new Set(),
       gateDecision: new Map(),
       wake: null,
     };
@@ -542,7 +539,6 @@ class Runner {
           mounts: deriveMounts(control.snapshot, node.id),
           askHuman: (question) => this.onAskHuman(control, node, nodeRunId, iter, question),
         });
-        if (control.invalidated.has(key)) return; // 취소로 무효화됨
         await this.settleSucceeded(control, node, nodeRunId, iter);
       } else if (node.type === "gate") {
         await this.runGate(control, node, nodeRunId, iter);
@@ -552,7 +548,6 @@ class Runner {
         throw new Error(`알 수 없는 노드 타입: ${node.type}`);
       }
     } catch (e) {
-      if (control.invalidated.has(key)) return;
       const msg = control.cancelled
         ? "실행 중 취소됨"
         : (e as Error).message || String(e);

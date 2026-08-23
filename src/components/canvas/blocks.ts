@@ -36,16 +36,6 @@ export const ACTIVE_BLOCKS: BlockDef[] = [
   },
 ];
 
-/** M1 미노출/비활성 카테고리(추가 불가). */
-export const DISABLED_CATEGORIES: { label: string; color: string; tip: string }[] =
-  [
-    { label: "Gate", color: "var(--c-gate)", tip: "조건 분기 (M2)" },
-    { label: "Human", color: "var(--c-human)", tip: "사람 개입 지점 (M2)" },
-    { label: "Skill", color: "var(--c-mount)", tip: "Agent 장착 기술 (M2)" },
-    { label: "Rule", color: "var(--c-mount)", tip: "Agent 장착 규칙 (M2)" },
-    { label: "Tool", color: "var(--c-mount)", tip: "Agent 장착 도구 (M2)" },
-  ];
-
 /** 타입별 기본 config. */
 export function defaultConfig(type: NodeType): NodeConfig {
   switch (type) {

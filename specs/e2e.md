@@ -1,16 +1,22 @@
 # recruit-flow e2e + AI 자동 힐링
 
 2026-08-07 도입. 실제 브라우저(Playwright/Chromium) UI 검증 층 + 실패 시
-AI가 자동 수정하는 힐링 루프. 스모크(엔진 73·챗 38)가 못 덮는 UI·HTTP
-경로를 덮는다.
+AI가 자동 수정하는 힐링 루프.
 
-## 명령 (★ 반드시 Node 22 — 공급 방식은 머신별, CLAUDE.md 참조)
+> **검증 스택 개편(2026-08-23, 감사 R1)**: 구 스모크 2종(엔진 82·챗 38)은
+> pg 재플랫폼 후 better-sqlite3 잔재로 실행 불능이 되어 **공식 폐기**했다.
+> 행동 경로는 e2e(31 결정론 + phase2 격리 3 = 34)가, 순수 로직(gate 조건식
+> 파서·`parseJsonLoose`·`runAgentJson` JSON 재시도)은 신설
+> **`npm run test:unit`**(`scripts/unit-tests.mts`, 27 단언)이 담당한다.
+
+## 명령 (pg 전환 후 Node 22 제약 소멸 — CLAUDE.md 런타임 절 참조)
 
 | 명령 | 용도 |
 | --- | --- |
 | `npm run e2e:install` | 최초 1회 — Chromium 설치 |
 | `npm run e2e` | 결정론 스텁 모드 e2e(기본, `@live` 제외) |
-| `npm run e2e:live` | `@live` 태그만 — 실 LLM(구독 쿼터 소비) |
+| `npm run e2e:live` | `@live` 태그만 — 실 LLM(구독 쿼터 소비), 전용 pg DB `recruit_flow_live` |
+| `npm run test:unit` | 순수 로직 단위 테스트(DB·서버·LLM 불요) |
 | `npm run e2e:heal` | e2e 실패 시 AI 자동 수정 루프(아래) |
 
 ## 결정론 스텁 모드
@@ -30,28 +36,32 @@ AI가 자동 수정하는 힐링 루프. 스모크(엔진 73·챗 38)가 못 덮
 
 ## 구성
 
-- `playwright.config.ts`(포트 3200, workers 1, retries 1, JSON 리포터) +
-  `playwright.live.config.ts`(포트 3201, `@live`).
-- `e2e/support/`: `start-server.mjs`(격리 DB `tmp/e2e/*.db` 마이그레이션+
-  시드→next dev 스폰, **Node 22 절대경로**) · `seed.mjs` · `api.ts`(그래프
-  PUT·run 폴링) · `fixtures.ts`(파이프라인 픽스처).
+- `playwright.config.ts`(포트 3200, workers 1, retries 1, JSON 리포터,
+  격리 pg DB `recruit_flow_e2e`) + `playwright.live.config.ts`(포트 3201,
+  `@live`, 격리 pg DB `recruit_flow_live`).
+- `e2e/support/`: `start-server.mjs`(admin으로 격리 pg 스키마 리셋→
+  마이그레이션→GRANT→시드 후 앱을 rf_app로 스폰) · `seed.mjs` ·
+  `api.ts`(그래프 PUT·run 폴링) · `fixtures.ts`(파이프라인 픽스처).
 - 전략: **배선은 API(putGraph)로 세팅, UI는 렌더·실행·상태를 검증**(React
   Flow 드래그 flakiness 격리). 고정 sleep 금지 — locator auto-wait·expect.poll.
 - ★ e2e는 **다른 next dev가 떠 있으면 실패**(`.next/dev` 락은 프로젝트당 1개).
   실행 전 수동 dev 서버를 종료할 것.
 
-## 테스트 맵 (29 케이스, 스펙 출처)
+## 테스트 맵 (결정론 34 케이스 + @live 3, 스펙 출처)
 
 m1-basic-flow(M1 완료기준: 문서→실행→상태·스트리밍→다운로드→복원→중단) ·
 m1-canvas-edit · m2-gate-loop(fail→재작성→회차칩→pass / gate_failed) ·
 m2-partial-rerun · m2-human · m3-chat(블록 add→트레이·문서등록·작성해줘·
-스레드 복원) · m3-gap-interview · live-canary(@live 3건).
+스레드 복원) · m3-gap-interview · sse-recovery(CDP 오프라인 강제→복원 재구독) ·
+completion-verification · phase2-isolation(멀티유저 앱레벨+SSE 격리 2건) ·
+live-canary(@live 3건, 결정론 스위트에서 제외).
 
 ## AI 힐링 루프 (`scripts/e2e-heal.mts`)
 
 `npm run e2e:heal` — e2e 실패 → `claude -p`(headless, 구독 인증)가 실패
-로그·트레이스 보고 **src/·e2e/ 수정** → 재검증(typecheck+smoke 73/38) →
-초록이면 자동 커밋. 최대 3회, 지속 실패 시 `e2e-heal-report.md`.
+로그·트레이스 보고 **src/·e2e/ 수정** → 재검증(typecheck + `test:unit`,
+2026-08-23 스모크 폐기로 교체) → 초록이면 자동 커밋. 최대 3회, 지속 실패 시
+`e2e-heal-report.md`.
 
 안전장치: clean-tree preflight · `acceptEdits`+allowedTools 화이트리스트 ·
 금지경로(specs/·drizzle/·인프라) diff 가드·롤백 · 테스트 완화 금지(스펙
@@ -115,8 +125,11 @@ enabled") → `claude -p`가 원인 진단·`disabled={!run.canRun || run.busy}`
 - 스모크의 `every`/`!some` 단언은 대상 개수 또는 허용 상태를 먼저 확인하도록
   보강했다. lint는 ESLint 9 flat config로 복구했다.
 
-통합 재검증: lint 0 errors(기존 warning 22) · typecheck GREEN · build GREEN ·
-결정론 E2E **29/29, retries=0** · 엔진 스모크 **82/82** · 챗봇 스모크 **38/38**.
+통합 재검증(당시): lint 0 errors · typecheck GREEN · build GREEN ·
+결정론 E2E 29/29(retries=0) · 엔진 스모크 82/82 · 챗봇 스모크 38/38.
+> 이 스모크 수치는 **역사 기록**이다 — 스모크 2종은 pg 재플랫폼 후 실행 불능이
+> 되어 2026-08-23 공식 폐기됐고(문서 상단 참조), 현행 회귀 게이트는
+> **e2e 34 + `test:unit` 27**이다.
 
 ### 실제 데이터·LLM 실증 (2026-08-14)
 

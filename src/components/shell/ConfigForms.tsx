@@ -76,20 +76,11 @@ export function AgentForm({
   config,
   onChange,
   overriddenKeys,
-  nodeId,
 }: {
   config: AgentConfig;
   onChange: (c: AgentConfig) => void;
   overriddenKeys: Set<string> | null;
-  nodeId: string;
 }) {
-  const edges = useCanvasStore((s) => s.edges);
-  const nodes = useCanvasStore((s) => s.nodes);
-  const mountedNodes = edges
-    .filter((e) => e.kind === "mount" && e.targetNodeId === nodeId)
-    .map((e) => nodes.find((n) => n.id === e.sourceNodeId))
-    .filter(Boolean) as NodeRow[];
-
   return (
     <>
       <div className={panelStyles.field}>
@@ -127,20 +118,6 @@ export function AgentForm({
           <option value="json">JSON</option>
         </select>
       </div>
-      {mountedNodes.length > 0 && (
-        <div className={panelStyles.field}>
-          <label data-tip="캔버스에서 점선으로 장착된 블록들. 배선 변경은 캔버스에서">
-            장착됨
-          </label>
-          <div className={panelStyles.mountedList}>
-            {mountedNodes.map((n) => (
-              <span key={n.id} className={panelStyles.mountedChip}>
-                {n.type.toUpperCase()} {n.name}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
       <details className={panelStyles.adv}>
         <summary data-tip="자주 바꾸지 않는 설정. 기본값으로 두면 됩니다">
           고급 설정

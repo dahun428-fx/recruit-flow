@@ -4,6 +4,8 @@
 // DELETE /api/documents/[id]                    → { ok: true } | 404
 import { NextResponse } from "next/server";
 import { addDocumentVersion, deleteDocument, getDocument, moveDocument } from "@/lib/db/queries";
+import { getCurrentUserId } from "@/lib/auth/context";
+import { eventBus } from "@/lib/engine/events";
 import { withUser } from "@/lib/auth/with-user";
 
 export const GET = withUser(async (
@@ -37,6 +39,8 @@ export const PUT = withUser(async (
   if (!doc) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
+  // 사람 경로도 챗봇 edit_document와 동일하게 SSE 통지(engine.md §3).
+  eventBus.emitDocumentChanged(getCurrentUserId(), "updated", doc.id, doc.currentVersion);
   return NextResponse.json(doc);
 });
 
@@ -67,6 +71,8 @@ export const PATCH = withUser(async (
       { status: 400 },
     );
   }
+  // 폴더 이동도 목록 변형 — updated로 통지해 탐색기 트리를 갱신.
+  eventBus.emitDocumentChanged(getCurrentUserId(), "updated", id);
   return NextResponse.json({ ok: true });
 });
 
@@ -82,5 +88,6 @@ export const DELETE = withUser(async (
   // document_versions는 FK onDelete:"cascade"로 함께 삭제됨.
   // Input 노드가 config.documentId로 이 문서를 참조 중이었다면
   // 실행 시점에 "문서 없음"으로 실패(JSON 필드라 DB 제약 없음).
+  eventBus.emitDocumentChanged(getCurrentUserId(), "deleted", id);
   return NextResponse.json({ ok: true });
 });

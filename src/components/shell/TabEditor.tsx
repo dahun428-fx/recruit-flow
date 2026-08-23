@@ -324,7 +324,6 @@ function BlockDefEditor({ defId, nodeId }: { defId: string; nodeId?: string }) {
                   config={config as AgentConfig}
                   onChange={(c) => handleFormChange(c)}
                   overriddenKeys={null}
-                  nodeId={nodeId ?? ""}
                 />
               )}
               {def.type === "input" && (
@@ -495,7 +494,6 @@ function NodeProperties({
           config={resolvedConfig as AgentConfig}
           onChange={setConfig}
           overriddenKeys={isRef ? getOverriddenKeys(node.config, defConfig) : null}
-          nodeId={node.id}
         />
       )}
       {node.type === "input" && (
